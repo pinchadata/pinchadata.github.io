@@ -189,8 +189,12 @@ body::before{
 /* ---------- PLANIFICACIÓN ---------- */
 .plan-header{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; flex-wrap:wrap; gap:6px;}
 .plan-header b{font-family:var(--font-display); font-size:17px; letter-spacing:0.2px;}
-.plan-day-group{margin-bottom:20px;}
-.plan-day-title{font-family:var(--font-display); font-size:14px; font-weight:600; letter-spacing:0.3px; text-transform:uppercase; color:var(--red); margin-bottom:10px; padding-bottom:6px; border-bottom:2px solid var(--red);}
+.day-tabs{display:flex; gap:8px; overflow-x:auto; -webkit-overflow-scrolling:touch; margin-bottom:16px; padding-bottom:4px; -ms-overflow-style:none; scrollbar-width:none;}
+.day-tabs::-webkit-scrollbar{display:none;}
+.day-tab-btn{flex-shrink:0; background:var(--bg-raise); border:1px solid var(--line); color:var(--ink-dim); padding:8px 16px; border-radius:20px; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; font-family:var(--font-body); transition:all .15s;}
+.day-tab-btn:hover{border-color:var(--red);}
+.day-tab-btn.active{background:var(--red); border-color:var(--red); color:var(--white);}
+.day-tab-panel{}
 .plan-exercise-ordered{display:flex; gap:14px; background:var(--bg-raise); border-left:4px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:10px;}
 .plan-exercise-editable{display:flex; gap:10px; align-items:center; background:var(--bg-raise); border-left:4px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:8px;}
 .plan-order-controls{display:flex; flex-direction:column; gap:2px; flex-shrink:0;}
@@ -3422,19 +3426,33 @@ function renderPlanningTab(){
 function currentPlan(){
   return STATE.plans.slice().sort((a,b)=>b.dateFrom.localeCompare(a.dateFrom))[0] || null;
 }
+let dayTabsCounter = 0;
 function renderPlanItemsGrouped(items){
   if(!items.length) return '<div class="empty-state">Todavía no tiene ejercicios cargados.</div>';
   const hasAnyDay = items.some(it=>it.day);
   if(!hasAnyDay) return renderPlanItemsSequence(items);
   const dayGroups = DAYS_OF_WEEK.map(day=>({day, dayItems: items.filter(it=>it.day===day)})).filter(g=>g.dayItems.length);
   const noDay = items.filter(it=>!it.day);
-  let html = dayGroups.map(g=>`
-    <div class="plan-day-group">
-      <div class="plan-day-title">🗓️ ${g.day}</div>
-      ${renderPlanItemsSequence(g.dayItems)}
-    </div>`).join('');
-  if(noDay.length) html += `<div class="plan-day-group"><div class="plan-day-title">Sin día asignado</div>${renderPlanItemsSequence(noDay)}</div>`;
-  return html;
+  if(noDay.length) dayGroups.push({day:'Sin día asignado', dayItems:noDay});
+  if(dayGroups.length<=1) return dayGroups.map(g=>renderPlanItemsSequence(g.dayItems)).join('');
+  const uid = 'daytabs-'+(dayTabsCounter++);
+  return `
+  <div class="day-tabs" data-daytabs="${uid}">
+    ${dayGroups.map((g,i)=>`<button type="button" class="day-tab-btn ${i===0?'active':''}" data-daytab="${uid}-${i}">${g.day}</button>`).join('')}
+  </div>
+  ${dayGroups.map((g,i)=>`<div class="day-tab-panel" data-daypanel="${uid}-${i}" style="display:${i===0?'block':'none'};">${renderPlanItemsSequence(g.dayItems)}</div>`).join('')}
+  `;
+}
+function wireDayTabs(){
+  document.querySelectorAll('.day-tab-btn').forEach(btn=>btn.addEventListener('click', ()=>{
+    const tabsContainer = btn.closest('.day-tabs');
+    const uid = tabsContainer.dataset.daytabs;
+    tabsContainer.querySelectorAll('.day-tab-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll(`[data-daypanel^="${uid}-"]`).forEach(p=>{
+      p.style.display = (p.dataset.daypanel===btn.dataset.daytab) ? 'block' : 'none';
+    });
+  }));
 }
 function renderPlanItemsSequence(items){
   return items.map((it,idx)=>{
@@ -4218,7 +4236,10 @@ function afterRender(){
     renderAnalysisBody(sel.value);
   }
   if(currentView==='my-tests'){ drawProfileCharts(SESSION.playerId); }
-  if(currentView==='planning' && SESSION.role==='pf'){ renderPlanningTab(); }
+  if(currentView==='planning'){
+    if(SESSION.role==='pf') renderPlanningTab();
+    wireDayTabs();
+  }
   if(currentView==='calendar'){
     let pendingLogo = null;
     const typeSel = document.getElementById('ev-type');
