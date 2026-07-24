@@ -605,6 +605,38 @@ const MOOD_LEVELS=[{e:'😞',l:'Bajón'},{e:'😕',l:'Meh'},{e:'😐',l:'Neutral
 const RPE_LEVELS = ['Reposo total','Muy, muy suave','Muy suave','Suave','Moderado','Algo intenso','Intenso','Muy intenso','Muy, muy intenso','Casi máximo','Esfuerzo máximo'];
 const APP_ICON_DATA_URI = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj48cmVjdCB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgZmlsbD0iIzEwMTExMCIvPjxwb2x5Z29uIHBvaW50cz0iMCwwIDUxMiwwIDUxMiw1MTIiIGZpbGw9IiNjODEwMmUiLz48cG9seWdvbiBwb2ludHM9IjAsMCAwLDUxMiA1MTIsNTEyIiBmaWxsPSIjZjRmMmVhIi8+PGNpcmNsZSBjeD0iMjU2IiBjeT0iMjU2IiByPSIxODAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2Y0ZjJlYSIgc3Ryb2tlLXdpZHRoPSIxMCIvPjwvc3ZnPg==';
 const RTP_STAGES = ['Reposo y tratamiento','Movilidad y fuerza básica','Readaptación física individual','Reintegración al grupo','Alta deportiva completa'];
+/* Videos de demostración por ejercicio — se va completando en tandas. Solo se aplica si el
+   ejercicio todavía no tiene un video propio cargado (nunca pisa lo que el PF suba a mano). */
+const EXERCISE_VIDEO_URLS = {
+  'Sentadilla goblet': 'https://www.youtube.com/watch?v=lmRIncjy39o',
+  'Sentadilla trasera con barra (back squat)': 'https://www.youtube.com/watch?v=xkcMxMf1X9A',
+  'Sentadilla frontal (front squat)': 'https://www.youtube.com/watch?v=yyIpwHq_eE8',
+  'Sentadilla búlgara (split squat)': 'https://www.youtube.com/watch?v=RSRNqe9f7XM',
+  'Zancada caminando (walking lunge)': 'https://www.youtube.com/watch?v=BenhAbJiTsw',
+  'Prensa de piernas (leg press)': 'https://www.youtube.com/watch?v=K5n2vg3oZa4',
+  'Sentadilla hack': 'https://www.youtube.com/watch?v=-lAnEGH2blE',
+  'Step-up con mancuernas': 'https://www.youtube.com/watch?v=DxUNi119Qzs',
+  'Sentadilla Zercher': 'https://www.youtube.com/watch?v=13N0kvsB_9Y',
+  'Sentadilla con salto (jump squat)': 'https://www.youtube.com/watch?v=tZSYZdtbONc',
+  'Sentadilla a una pierna asistida (pistol)': 'https://www.youtube.com/watch?v=6pUx2ktKCMQ',
+  'Extensión de cuádriceps en máquina': 'https://www.youtube.com/watch?v=tTbJBUKnWU8',
+  'Sentadilla sumo con mancuerna': 'https://www.youtube.com/watch?v=Sq88Uw0roVU',
+  'Zancada estática (split squat isométrico)': 'https://www.youtube.com/watch?v=DAIjxDlSQbo',
+  'Sentadilla con banda (band resisted squat)': 'https://www.youtube.com/watch?v=rcjtbCYtI8o',
+  'Sentadilla box squat': 'https://www.youtube.com/watch?v=RL2tjxz0ikw',
+  'Zancada lateral (lateral lunge)': 'https://www.youtube.com/watch?v=liFeq7swKfc',
+  'Sentadilla búlgara con salto': 'https://www.youtube.com/watch?v=z_0Uf9HPvtk',
+  'Step-up con salto (unilateral explosivo)': 'https://www.youtube.com/watch?v=cbTOQfZVo0s',
+  'Sentadilla a una pierna asistida (pistol squat asistido)': 'https://www.youtube.com/watch?v=6pUx2ktKCMQ',
+  'Zancada búlgara con mancuernas': 'https://www.youtube.com/watch?v=KkKPwxcnhXw',
+};
+function applyExerciseVideos(){
+  let changed = false;
+  STATE.exercises.forEach(ex=>{
+    if(!ex.videoUrl && EXERCISE_VIDEO_URLS[ex.name]){ ex.videoUrl = EXERCISE_VIDEO_URLS[ex.name]; changed = true; }
+  });
+  return changed;
+}
 const EVENT_TYPES = ['Partido','Entrenamiento','Descanso','Viaje','Otro'];
 const PF_NAV = [
   {view:'dashboard', icon:'◈', label:'Panel general'},
@@ -853,6 +885,7 @@ async function loadAll(){
       await storageSet('exercises', STATE.exercises, true);
       await storageSet('descriptionscleared', true, true);
     }
+    if(applyExerciseVideos()) await storageSet('exercises', STATE.exercises, true);
     if(!plans) await storageSet('plans', STATE.plans, true);
     if(!maxLifts) await storageSet('maxlifts', STATE.maxLifts, true);
     if(!individualPlans) await storageSet('individualplans', STATE.individualPlans, true);
@@ -4218,6 +4251,17 @@ function viewSettings(){
     <div class="field-wrap"><label class="field">Tamaño de fuente: <span id="fontsize-display">${prefs.fontSize}</span>px</label><input type="range" min="12" max="20" id="settings-fontsize" value="${prefs.fontSize}"></div>
     <button class="btn" id="settings-save">Guardar preferencias</button>
   </div>
+  <div class="card" style="max-width:640px; margin-top:16px;">
+    <h3>Usuario y contraseña</h3>
+    <div class="section-sub">Usuario actual: <b>${(STATE.accounts.find(a=>a.id===SESSION.accountId)||{}).username||'—'}</b></div>
+    <div class="field-wrap"><label class="field">Contraseña actual (para confirmar)</label><input type="password" id="acc-current-pw"></div>
+    <div class="field-wrap"><label class="field">Nuevo usuario (dejalo vacío para no cambiarlo)</label><input id="acc-new-username" autocomplete="off"></div>
+    <div class="row">
+      <div class="field-wrap"><label class="field">Nueva contraseña (dejalo vacío para no cambiarla)</label><input type="password" id="acc-new-pw"></div>
+      <div class="field-wrap"><label class="field">Confirmar nueva contraseña</label><input type="password" id="acc-new-pw2"></div>
+    </div>
+    <button class="btn secondary" id="btn-save-account">Guardar cambios de cuenta</button>
+  </div>
   ${SESSION.role==='pf' ? `
   <div class="card" style="max-width:640px; margin-top:16px;">
     <h3>Backup completo</h3>
@@ -4406,6 +4450,30 @@ function afterRender(){
     });
     const backupBtn = document.getElementById('btn-full-backup');
     if(backupBtn) backupBtn.addEventListener('click', downloadFullBackup);
+    document.getElementById('btn-save-account').addEventListener('click', async ()=>{
+      const acc = STATE.accounts.find(a=>a.id===SESSION.accountId);
+      if(!acc){ toast('No se encontró tu cuenta'); return; }
+      const currentPw = document.getElementById('acc-current-pw').value;
+      const newUsername = document.getElementById('acc-new-username').value.trim();
+      const newPw = document.getElementById('acc-new-pw').value;
+      const newPw2 = document.getElementById('acc-new-pw2').value;
+      if(!currentPw){ toast('Ingresá tu contraseña actual para confirmar'); return; }
+      const currentHash = await hashPassword(currentPw);
+      if(currentHash !== acc.passwordHash){ toast('La contraseña actual no es correcta'); return; }
+      if(!newUsername && !newPw){ toast('No cargaste ningún cambio'); return; }
+      if(newUsername){
+        const taken = STATE.accounts.some(a=>a.id!==acc.id && a.username.toLowerCase()===newUsername.toLowerCase());
+        if(taken){ toast('Ese nombre de usuario ya está en uso'); return; }
+      }
+      if(newPw || newPw2){
+        if(newPw.length<4){ toast('La contraseña nueva debe tener al menos 4 caracteres'); return; }
+        if(newPw!==newPw2){ toast('Las dos contraseñas nuevas no coinciden'); return; }
+      }
+      if(newUsername) acc.username = newUsername;
+      if(newPw) acc.passwordHash = await hashPassword(newPw);
+      await saveAccountDoc(acc);
+      toast('Cuenta actualizada'); render();
+    });
   }
 }
 
