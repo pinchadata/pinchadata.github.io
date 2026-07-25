@@ -207,8 +207,8 @@ body::before{
 .plan-exercise-name{font-size:14.5px; font-weight:600; color:var(--white);}
 .plan-exercise-desc{font-size:12.5px; color:var(--ink-dim); margin-top:3px; line-height:1.4;}
 .plan-exercise-note{font-size:12px; color:var(--amber); margin-top:5px;}
-.plan-video-link{display:inline-block; margin-top:7px; font-size:12px; color:var(--blue); font-weight:700; text-decoration:none;}
-.plan-video-link:hover{text-decoration:underline;}
+.video-link{display:inline-flex; align-items:center; gap:6px; margin-top:8px; padding:6px 13px; background:var(--bg-raise); border:1.5px solid var(--red); border-radius:20px; font-size:12.5px; font-weight:700; color:var(--red); text-decoration:none; transition:all .15s; -webkit-tap-highlight-color:transparent;}
+.video-link:hover, .video-link:active{background:var(--red); color:var(--white);}
 .individual-plan-card{border:2px solid var(--red); border-radius:16px; padding:18px; background:rgba(200,16,46,0.07); margin-bottom:18px;}
 .individual-plan-badge{display:inline-block; background:var(--red); color:var(--white); font-size:10px; text-transform:uppercase; letter-spacing:0.6px; padding:4px 11px; border-radius:20px; font-weight:700; margin-bottom:10px;}
 .chart-box.tall{height:260px;}
@@ -436,6 +436,8 @@ input[type=range]::-moz-range-thumb{width:19px; height:19px; border-radius:50%; 
   table{display:block; overflow-x:auto; -webkit-overflow-scrolling:touch; white-space:nowrap;}
   .bottom-nav-btn{font-size:10px;}
   .bottom-nav-btn .ic{font-size:20px;}
+  /* Botón de video del plan/biblioteca: área táctil más generosa en mobile */
+  .video-link{padding:9px 16px; font-size:13px;}
   /* Evita que iOS Safari haga zoom solo al tocar un campo (pasa si el font-size es menor a 16px) */
   input, select, textarea{ font-size:16px; padding:11px 12px; }
   input[type=date]{ padding:11px 6px; min-width:0; -webkit-appearance:none; }
@@ -629,6 +631,163 @@ const EXERCISE_VIDEO_URLS = {
   'Step-up con salto (unilateral explosivo)': 'https://www.youtube.com/watch?v=cbTOQfZVo0s',
   'Sentadilla a una pierna asistida (pistol squat asistido)': 'https://www.youtube.com/watch?v=6pUx2ktKCMQ',
   'Zancada búlgara con mancuernas': 'https://www.youtube.com/watch?v=KkKPwxcnhXw',
+  'Peso muerto rumano': 'https://www.youtube.com/watch?v=KN5vN3JskqI',
+  'Peso muerto convencional': 'https://www.youtube.com/watch?v=VL5Ab0T07e4',
+  'Peso muerto sumo': 'https://www.youtube.com/watch?v=ab1sUJErTzc',
+  'Hip thrust con barra': 'https://www.youtube.com/watch?v=S_uZP4UH6J0',
+  'Puente de glúteo a una pierna': 'https://www.youtube.com/watch?v=18GVqjfHy-M',
+  'Buenos días (good morning)': 'https://www.youtube.com/watch?v=nWyx81AfTos',
+  'Peso muerto a una pierna (single-leg RDL)': 'https://www.youtube.com/watch?v=IKstZgIiKQk',
+  'Kettlebell swing': 'https://www.youtube.com/watch?v=1Qi0NQW89Oc',
+  'Curl femoral nórdico': 'https://www.youtube.com/watch?v=Yn7aqLkeF0U',
+  'Peso muerto rumano a una pierna con mancuerna': 'https://www.youtube.com/watch?v=IKstZgIiKQk',
+  'Peso muerto rumano unilateral con mancuerna': 'https://www.youtube.com/watch?v=IKstZgIiKQk',
+  'Curl femoral en máquina': 'https://www.youtube.com/watch?v=3gZm9wGTsEo',
+  'Cable pull-through': 'https://www.youtube.com/watch?v=fbF4_pn_0xc',
+  'Hiperextensión lumbar (back extension)': 'https://www.youtube.com/watch?v=k6LyPhGRV-o',
+  'Puente de glúteo con barra (hip bridge)': 'https://www.youtube.com/watch?v=DQv1IMQDbE4',
+  'Peso muerto con déficit': 'https://www.youtube.com/watch?v=R43pt8Tzrgg',
+  'Patada de glúteo en polea (cable kickback)': 'https://www.youtube.com/watch?v=VSgMyiOu0uE',
+  'Marcha con banda en glúteos (band walk cadera)': 'https://www.youtube.com/watch?v=y_bqFDQZSHQ',
+  'Hip thrust unilateral': 'https://www.youtube.com/watch?v=qCObDXTe4KY',
+  'Puente de glúteo a una pierna con carga': 'https://www.youtube.com/shorts/Fe4TTfFsK4A',
+  'Press banca con barra': 'https://www.youtube.com/watch?v=Pp8rHcFVIYg',
+  'Press banca con mancuernas': 'https://www.youtube.com/watch?v=J-gWN5hYwRU',
+  'Press militar con barra': 'https://www.youtube.com/watch?v=Ftb3rlCE-zo',
+  'Press militar con mancuernas': 'https://www.youtube.com/watch?v=guW_ENwLOMI',
+  'Flexiones de brazos (push-up)': 'https://www.youtube.com/watch?v=WDIpL0pjun0',
+  'Fondos en paralelas (dips)': 'https://www.youtube.com/watch?v=85u_8mz5lBA',
+  'Press inclinado con mancuernas': 'https://www.youtube.com/watch?v=sK4Rvug6ufo',
+  'Press banca agarre cerrado': 'https://www.youtube.com/watch?v=UYJsFzqdgK4',
+  'Elevaciones laterales': 'https://www.youtube.com/watch?v=nnH63icHYXY',
+  'Press Arnold': 'https://www.youtube.com/watch?v=ris9tKqMwgU',
+  'Flexiones con pies elevados': 'https://www.youtube.com/watch?v=QBlYp-EwHlo',
+  'Extensión de tríceps en polea': 'https://www.youtube.com/watch?v=_iSX_125XUg',
+  'Press de piso (floor press)': 'https://www.youtube.com/watch?v=gacJl2rHwtg',
+  'Flexiones diamante': 'https://www.youtube.com/watch?v=8_ILkbB9an8',
+  'Press militar sentado en máquina': 'https://www.youtube.com/watch?v=3R14MnZbcpw',
+  'Press de pecho en máquina (chest press)': 'https://www.youtube.com/watch?v=pLofEAcfsO8',
+  'Landmine press a una mano': 'https://www.youtube.com/watch?v=TY_zsi0kOyI',
+  'Press de hombro unilateral con mancuerna': 'https://www.youtube.com/watch?v=JyJJLEnCcUo',
+  'Press de banca unilateral con mancuerna': 'https://www.youtube.com/watch?v=GcoQbJAWbVY',
+  'Flexiones a una mano asistidas (banda)': 'https://www.youtube.com/watch?v=UZk_EOS1-bs',
+  'Dominadas (pull-up)': 'https://www.youtube.com/watch?v=TMnxKjdYcME',
+  'Remo con barra': 'https://www.youtube.com/watch?v=qXrTDQG1oUQ',
+  'Remo con mancuerna a una mano': 'https://www.youtube.com/watch?v=fURsHPHgssI',
+  'Jalón al pecho en polea (lat pulldown)': 'https://www.youtube.com/watch?v=Z_3xHwuO8Tk',
+  'Remo en máquina': 'https://www.youtube.com/watch?v=f_r95UajQcg',
+  'Remo invertido (TRX/barra baja)': 'https://www.youtube.com/watch?v=jIZsezKNZVI',
+  'Face pull': 'https://www.youtube.com/watch?v=7z65m-qWJrA',
+  'Curl de bíceps con barra': 'https://www.youtube.com/watch?v=JJB8XgKltA8',
+  'Curl de bíceps con mancuernas': 'https://www.youtube.com/watch?v=6DeLZ6cbgWQ',
+  'Remo en T (T-bar row)': 'https://www.youtube.com/watch?v=BbBR3v2UShw',
+  'Encogimientos de hombros (shrugs)': 'https://www.youtube.com/watch?v=KbsQ1E8Hg0o',
+  'Pull-over con mancuerna': 'https://www.youtube.com/watch?v=moKuOuFNBDM',
+  'Dominadas supinas (chin-up)': 'https://www.youtube.com/watch?v=e1YSApl-QcM',
+  'Remo Pendlay': 'https://www.youtube.com/watch?v=x5jwg87PxJQ',
+  'Jalón al pecho agarre cerrado': 'https://www.youtube.com/watch?v=mUoo2l-p8Hw',
+  'Remo con banda elástica': 'https://www.youtube.com/watch?v=Y3H17rshgZE',
+  'Curl martillo con mancuernas': 'https://www.youtube.com/watch?v=G7hy-AxQwcQ',
+  'Remo unilateral con banda en polea alta': 'https://www.youtube.com/watch?v=Y3H17rshgZE',
+  'Dominadas asistidas con banda': 'https://www.youtube.com/watch?v=4yE-XGDWJPg',
+  'Plancha frontal': 'https://www.youtube.com/watch?v=mwlp75MS6Rg',
+  'Plancha lateral': 'https://www.youtube.com/watch?v=iNbH7_edNI8',
+  'Pallof press': 'https://www.youtube.com/watch?v=_2xWmYNnFS8',
+  'Rueda abdominal (ab wheel rollout)': 'https://www.youtube.com/watch?v=NbudTqiwguk',
+  'Dead bug': 'https://www.youtube.com/watch?v=bxn9FBrt4-A',
+  'Bird dog': 'https://www.youtube.com/watch?v=MEKThiUpdyc',
+  'Elevación de piernas colgado': 'https://www.youtube.com/watch?v=vwl68EF9M2Q',
+  'Giros rusos (Russian twist)': 'https://www.youtube.com/watch?v=fPxO-FA8acM',
+  'Plancha con toque de hombro': 'https://www.youtube.com/watch?v=eT93C-xUZI8',
+  'Abdominales en polea (cable crunch)': 'https://www.youtube.com/watch?v=DRL93IPIcRM',
+  'Hollow body hold': 'https://www.youtube.com/watch?v=0yPin8hSc8o',
+  'Marcha de oso (bear crawl)': 'https://www.youtube.com/watch?v=lRolga8vTyc',
+  'Anti-rotación con banda': 'https://www.youtube.com/watch?v=wzWgp3B_4zA',
+  'Sentadilla isométrica con anti-rotación (banda)': 'https://www.youtube.com/watch?v=wzWgp3B_4zA',
+  'Rotación de tronco con polea (woodchopper)': 'https://www.youtube.com/watch?v=dwdeKRZ3E6s',
+  '[Antirrotación] Chop resistido con banda (alto a bajo)': 'https://www.youtube.com/watch?v=dwdeKRZ3E6s',
+  'Pallof press (anti-rotación en polea)': 'https://www.youtube.com/watch?v=xeFp4MXad98',
+  'Dead bug con carga': 'https://www.youtube.com/watch?v=bxn9FBrt4-A',
+  'Rueda abdominal desde rodillas': 'https://www.youtube.com/watch?v=NbudTqiwguk',
+  'Elevación de piernas en banco': 'https://www.youtube.com/watch?v=vwl68EF9M2Q',
+  'Paseo del granjero bilateral (farmer\'s walk)': 'https://www.youtube.com/watch?v=VBobkldqqvk',
+  'Paseo del granjero unilateral (suitcase carry)': 'https://www.youtube.com/watch?v=1fb0Q2d0cd0',
+  '[Anti-inclinación lateral] Marcha unilateral con kettlebell (waiter\'s walk)': 'https://www.youtube.com/watch?v=1fb0Q2d0cd0',
+  '[Antirrotación] Remo renegado con kettlebell (renegade row)': 'https://www.youtube.com/watch?v=iuRRj6_Bqlg',
+  '[Antirrotación] Kettlebell halo': 'https://www.youtube.com/watch?v=Sci3lijQBmk',
+  '[Anti-flexión] Zercher hold con barra o kettlebell': 'https://www.youtube.com/watch?v=6QgWkA9DGmc',
+  '[Anti-flexión] Front rack carry con kettlebells': 'https://www.youtube.com/watch?v=lwAybZFwC6U',
+  '[Antirrotación] Landmine anti-rotación (press lateral)': 'https://www.youtube.com/watch?v=8s5zAnjRpHE',
+  'Lanzamiento rotacional de balón medicinal (contra pared)': 'https://www.youtube.com/watch?v=NP2e1Szrj28',
+  '[Anti-flexión] Peso muerto isométrico contra banda (hold)': 'https://www.youtube.com/watch?v=Wxtr54Ywwyw',
+  '[Anti-flexión] Good morning isométrico con banda': 'https://www.youtube.com/watch?v=34VzJ61Htcc',
+  'Plancha con arrastre (plank drag)': 'https://www.youtube.com/watch?v=l5SGEkK-QUU',
+  'Plancha con inestabilidad (plancha en TRX)': 'https://www.youtube.com/watch?v=qStgJoWxE7Y',
+  'Plancha lateral con rotación (thread the needle)': 'https://www.youtube.com/watch?v=1WLbz8k-O-I',
+  '[Anti-inclinación lateral] Plancha lateral con elevación de cadera': 'https://www.youtube.com/watch?v=UhgQi_cz5zA',
+  '[Anti-inclinación lateral] Sentadilla goblet con carga descentrada (offset)': 'https://www.youtube.com/watch?v=Qv4c0rJlwdk',
+  '[Anti-inclinación lateral] Peso muerto unilateral con kettlebell contralateral': 'https://www.youtube.com/watch?v=9inxLLbsQPw',
+  'Rollout con rueda abdominal de pie': 'https://www.youtube.com/watch?v=NbudTqiwguk',
+  'Activación de glúteos con banda (monster walk)': 'https://www.youtube.com/watch?v=6dn37ultZ8s',
+  'Movilidad de tobillo en pared (knee to wall)': 'https://www.youtube.com/watch?v=NqgwyM9hXMI',
+  'Movilidad de tobillo en cuña': 'https://www.youtube.com/watch?v=31jbHKixAOI',
+  'Movilidad torácica en cuadrupedia': 'https://www.youtube.com/watch?v=z2zv526I7M8',
+  'Movilidad torácica en cuadrupedia (thread the needle)': 'https://www.youtube.com/watch?v=z2zv526I7M8',
+  'Círculos de cadera (90/90)': 'https://www.youtube.com/watch?v=m51AZSXMvEA',
+  'Rotaciones de cadera 90/90': 'https://www.youtube.com/watch?v=m51AZSXMvEA',
+  'Movilidad de hombro con banda (band pull-apart)': 'https://www.youtube.com/watch?v=6eictYvPulw',
+  'Sentadilla profunda sostenida (deep squat hold)': 'https://www.youtube.com/watch?v=0wzrgyAurT8',
+  'Bird dog dinámico': 'https://www.youtube.com/watch?v=jrK_rA4ATeg',
+  'Activación de isquios con banda': 'https://www.youtube.com/watch?v=pdP0uJXvc44',
+  'Zancada con rotación de tronco': 'https://www.youtube.com/watch?v=mtE4jJpJnWw',
+  'Elevación de talones (activación de pantorrilla)': 'https://www.youtube.com/watch?v=s24fS58zMaU',
+  'Puente de glúteo con banda (marcha)': 'https://www.youtube.com/watch?v=RESEoAnLEmk',
+  'World\'s greatest stretch': 'https://www.youtube.com/watch?v=T6j7BpxeqqU',
+  'Movilidad de columna (cat-camel)': 'https://www.youtube.com/watch?v=V-zycfsFjq0',
+  'Movilidad de cadera con banda (hip CARs)': 'https://www.youtube.com/watch?v=zbH4XmSREoc',
+  'Activación de glúteo medio (clamshell con banda)': 'https://www.youtube.com/watch?v=aQVApsdOLSI',
+  'Movilidad de hombro con bastón (pass-through)': 'https://www.youtube.com/watch?v=x4J80WbhwdA',
+  'Activación de core (plancha corta pre-entrada)': 'https://www.youtube.com/watch?v=lO-pxFnevWw',
+  'Marcha de potenciación (A-skip)': 'https://www.youtube.com/watch?v=GQg9L28bi1g',
+  'Skipping bajo (activación de tren inferior)': 'https://www.youtube.com/watch?v=NTneiCjZYs4',
+  'Movilidad de muñeca y hombro con banda': 'https://www.youtube.com/watch?v=cFa_GseYato',
+  'Escalera de coordinación (agility ladder)': 'https://www.youtube.com/watch?v=z1OhMhCZa8I',
+  'Cargada de potencia (power clean)': 'https://www.youtube.com/watch?v=E2z5zK5V-MM',
+  'Cargada colgante (hang clean)': 'https://www.youtube.com/watch?v=QCQuZITCnPk',
+  'Segundo tiempo (clean pull / high pull)': 'https://www.youtube.com/watch?v=2Qv8pEnprpU',
+  'Arranque de potencia (power snatch)': 'https://www.youtube.com/watch?v=zUYMUr-m084',
+  'Arranque colgante (hang snatch)': 'https://www.youtube.com/watch?v=JzOOEs-NyIE',
+  'Envión (push jerk)': 'https://www.youtube.com/watch?v=wcvLdlPbnBE',
+  'Push press': 'https://www.youtube.com/watch?v=a8HQo8z20Uo',
+  'Salto al cajón con contramovimiento (box jump)': 'https://www.youtube.com/watch?v=G-bxQY57mKc',
+  'Drop jump vertical (salto en profundidad)': 'https://www.youtube.com/watch?v=GeN0S3XCZnM',
+  'Lanzamiento de balón medicinal por encima de cabeza (overhead throw)': 'https://www.youtube.com/watch?v=z1JiHB8a4PY',
+  'Cargada de potencia con mancuernas (dumbbell power clean)': 'https://www.youtube.com/watch?v=Wq-4jyPF1MM',
+  'Salto unilateral vertical (single leg hop)': 'https://www.youtube.com/watch?v=7WgzHOQGgYw',
+  'Salto unilateral horizontal (single leg bound)': 'https://www.youtube.com/watch?v=LAFf_sKB0cg',
+  'Saltos unilaterales repetidos (single leg hops en serie)': 'https://www.youtube.com/watch?v=7WgzHOQGgYw',
+  'Skater jump (salto lateral unilateral)': 'https://www.youtube.com/watch?v=usZgF8TBWcA',
+  'Saltos multidireccionales (adelante-atrás-lateral)': 'https://www.youtube.com/watch?v=cGhju-C-KQg',
+  'Salto con giro 180° (rotational jump)': 'https://www.youtube.com/watch?v=_-Q5ywo24_s',
+  'Bounding unilateral (zancada pliométrica)': 'https://www.youtube.com/watch?v=I7ChaipZVM4',
+  'Saltos de vallas bajas bilaterales (hurdle hops)': 'https://www.youtube.com/watch?v=JMFiIyLLAlk',
+  'Saltos de vallas bajas unilaterales': 'https://www.youtube.com/watch?v=TxtjHt8AZA0',
+  'Salto lateral sobre valla/cono (unilateral)': 'https://www.youtube.com/shorts/ePh_UnXVxHA',
+  'Lanzamiento rotacional de balón medicinal (rotational throw)': 'https://www.youtube.com/watch?v=PNI1QKiWfiY',
+  'Lanzamiento frontal de balón medicinal (chest pass explosivo)': 'https://www.youtube.com/watch?v=RQzfEiH2BHg',
+  'Contraste: drop jump + sprint de salida': 'https://www.youtube.com/watch?v=zv-zLuK9c0I',
+  'Lanzamiento con landmine rotacional': 'https://www.youtube.com/watch?v=rIiORxKGRW4',
+  'Lanzamiento con landmine unilateral (press-throw)': 'https://www.youtube.com/watch?v=ZO_rDTbadWk',
+  'Lanzamiento por encima de cabeza hacia atrás (scoop toss)': 'https://www.youtube.com/watch?v=DITJ6inZSYc',
+  'Lanzamiento lateral de balón medicinal (side throw contra pared)': 'https://www.youtube.com/watch?v=2IBj2r0wd0Y',
+  'Lanzamiento tipo remate de handball con balón medicinal liviano': 'https://www.youtube.com/shorts/_9_ttT7W3gE',
+  'Lanzamiento unilateral de balón medicinal desde el pecho': 'https://www.youtube.com/watch?v=Tp15-uhmnlQ',
+  'Lanzamiento con rotación de cadera desde media sentadilla': 'https://www.youtube.com/watch?v=PNI1QKiWfiY',
+  '[Anti-extensión] Fallout con banda de rodillas': 'https://www.youtube.com/watch?v=4JZkFePMTrM',
+  '[Anti-extensión] Plancha con press de banda (stir the pot)': 'https://www.youtube.com/watch?v=HYwXr-1vT9M',
+  '[Anti-extensión] Rueda abdominal con banda (resistencia agregada)': 'https://www.youtube.com/watch?v=4JZkFePMTrM',
+  'Sentadilla con salto (jump squat) con carga liviana': 'https://www.youtube.com/watch?v=tZSYZdtbONc',
+  'Drop jump horizontal (salto en profundidad a la distancia)': 'https://www.youtube.com/watch?v=GeN0S3XCZnM',
 };
 function applyExerciseVideos(){
   let changed = false;
@@ -3499,7 +3658,7 @@ function renderPlanItemsSequence(items){
         <div class="plan-exercise-cat" style="color:${style.color};">${style.icon} ${ex.category}</div>
         <div class="plan-exercise-name">${ex.name}${it.sets?` <span class="badge info">${it.sets}</span>`:''}</div>
         ${it.notes? `<div class="plan-exercise-note">📝 ${it.notes}</div>`:''}
-        ${ex.videoUrl? `<a href="${ex.videoUrl}" target="_blank" rel="noopener" class="plan-video-link">▶ Ver video</a>`:''}
+        ${ex.videoUrl? `<a href="${ex.videoUrl}" target="_blank" rel="noopener" class="video-link">▶ Ver video</a>`:''}
       </div>
     </div>`;
   }).join('');
@@ -3518,7 +3677,7 @@ function libraryReadOnlyHTML(){
     const items = STATE.exercises.filter(e=>e.category===cat).sort((a,b)=>a.name.localeCompare(b.name,'es'));
     if(!items.length) return '';
     return `<div style="margin-bottom:14px;"><div class="muted" style="font-size:10.5px; text-transform:uppercase; letter-spacing:0.8px; margin-bottom:6px;">${cat}</div>
-      ${items.map(ex=>`<div class="injury-row"><div style="flex:1;"><b>${ex.name}</b><div class="muted" style="font-size:12px; margin-top:2px;">${ex.description||''}</div>${ex.videoUrl?`<a href="${ex.videoUrl}" target="_blank" rel="noopener" style="font-size:12px; color:var(--blue);">Ver video ↗</a>`:''}</div></div>`).join('')}
+      ${items.map(ex=>`<div class="injury-row"><div style="flex:1;"><b>${ex.name}</b><div class="muted" style="font-size:12px; margin-top:2px;">${ex.description||''}</div>${ex.videoUrl?`<a href="${ex.videoUrl}" target="_blank" rel="noopener" class="video-link">▶ Ver video</a>`:''}</div></div>`).join('')}
     </div>`;
   }).join('');
 }
@@ -3541,7 +3700,7 @@ function libraryTabHTML(){
       return `<div style="margin-bottom:16px;"><div style="font-size:11px; text-transform:uppercase; letter-spacing:0.8px; margin-bottom:6px; color:${style.color}; font-weight:700;">${style.icon} ${cat} (${items.length})</div>
         ${items.length? items.map(ex=>`
         <div class="injury-row">
-          <div style="flex:1;"><b>${ex.name}</b><div class="muted" style="font-size:12px; margin-top:2px;">${ex.description||''}</div>${ex.videoUrl?`<a href="${ex.videoUrl}" target="_blank" rel="noopener" style="font-size:12px; color:var(--blue);">Ver video ↗</a>`:''}</div>
+          <div style="flex:1;"><b>${ex.name}</b><div class="muted" style="font-size:12px; margin-top:2px;">${ex.description||''}</div>${ex.videoUrl?`<a href="${ex.videoUrl}" target="_blank" rel="noopener" class="video-link">▶ Ver video</a>`:''}</div>
           <button class="btn ghost sm" data-editex="${ex.id}">Editar</button>
           <button class="btn ghost sm" data-delex="${ex.id}">Eliminar</button>
         </div>`).join('') : '<div class="muted" style="font-size:12.5px;">Sin ejercicios en esta categoría.</div>'}
