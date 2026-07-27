@@ -206,7 +206,7 @@ body::before{
 .plan-exercise-cat{font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;}
 .plan-exercise-name{font-size:14.5px; font-weight:600; color:var(--white);}
 .plan-exercise-desc{font-size:12.5px; color:var(--ink-dim); margin-top:3px; line-height:1.4;}
-.plan-exercise-note{font-size:12px; color:var(--amber); margin-top:5px;}
+.plan-exercise-note{font-size:12px; color:var(--ink-dim); font-style:italic; margin-top:5px;}
 .video-link{display:inline-flex; align-items:center; gap:6px; margin-top:8px; padding:6px 13px; background:var(--bg-raise); border:1.5px solid var(--red); border-radius:20px; font-size:12.5px; font-weight:700; color:var(--red); text-decoration:none; transition:all .15s; -webkit-tap-highlight-color:transparent;}
 .video-link:hover, .video-link:active{background:var(--red); color:var(--white);}
 .individual-plan-card{border:2px solid var(--red); border-radius:16px; padding:18px; background:rgba(200,16,46,0.07); margin-bottom:18px;}
@@ -789,10 +789,19 @@ const EXERCISE_VIDEO_URLS = {
   'Sentadilla con salto (jump squat) con carga liviana': 'https://www.youtube.com/watch?v=tZSYZdtbONc',
   'Drop jump horizontal (salto en profundidad a la distancia)': 'https://www.youtube.com/watch?v=GeN0S3XCZnM',
 };
+function normalizeExName(s){ return (s||'').trim().toLowerCase().replace(/\s+/g,' '); }
+const EXERCISE_VIDEO_URLS_NORM = (()=>{
+  const map = {};
+  Object.keys(EXERCISE_VIDEO_URLS).forEach(k=>{ map[normalizeExName(k)] = EXERCISE_VIDEO_URLS[k]; });
+  return map;
+})();
 function applyExerciseVideos(){
   let changed = false;
   STATE.exercises.forEach(ex=>{
-    if(!ex.videoUrl && EXERCISE_VIDEO_URLS[ex.name]){ ex.videoUrl = EXERCISE_VIDEO_URLS[ex.name]; changed = true; }
+    if(!ex.videoUrl){
+      const url = EXERCISE_VIDEO_URLS[ex.name] || EXERCISE_VIDEO_URLS_NORM[normalizeExName(ex.name)];
+      if(url){ ex.videoUrl = url; changed = true; }
+    }
   });
   return changed;
 }
@@ -1321,11 +1330,11 @@ async function saveMaxLifts(){ await storageSet('maxlifts', STATE.maxLifts, true
 async function saveIndividualPlans(){ await storageSet('individualplans', STATE.individualPlans, true); }
 const CATEGORY_STYLE = {
   'Dominante de rodilla': {icon:'🦵', color:'#5f8ca7'},
-  'Dominante de cadera': {icon:'⚡', color:'#e3a857'},
+  'Dominante de cadera': {icon:'⚡', color:'#b98c56'},
   'Empuje': {icon:'➡️', color:'#c8102e'},
   'Tracción': {icon:'⬅️', color:'#5fa777'},
-  'Zona media': {icon:'🎯', color:'#9a6fd1'},
-  'Movilidad y activación': {icon:'🤸', color:'#5f8ca7'},
+  'Zona media': {icon:'🎯', color:'#7d6b9e'},
+  'Movilidad y activación': {icon:'🤸', color:'#6f9e94'},
   'Potencia / Olímpico': {icon:'💥', color:'#c9a227'}
 };
 const RM_PERCENTAGES = [100,95,90,85,80,75,70];
