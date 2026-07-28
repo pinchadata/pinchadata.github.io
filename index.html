@@ -192,6 +192,15 @@ body::before{
 .day-tabs{display:flex; gap:8px; overflow-x:auto; -webkit-overflow-scrolling:touch; margin-bottom:16px; padding-bottom:4px; -ms-overflow-style:none; scrollbar-width:none;}
 .day-tabs::-webkit-scrollbar{display:none;}
 .day-tab-btn{flex-shrink:0; background:var(--bg-raise); border:1px solid var(--line); color:var(--ink-dim); padding:8px 16px; border-radius:20px; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; font-family:var(--font-body); transition:all .15s;}
+.clickable-row{cursor:pointer; transition:background .12s;}
+.clickable-row:hover{background:var(--bg-raise);}
+.wellness-mobile-card{background:var(--bg-raise); border-radius:12px; padding:14px 16px; margin-bottom:10px; border-left:4px solid var(--line); cursor:pointer;}
+.wellness-mobile-top{display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:15px;}
+.wellness-mobile-sub{font-size:12px; margin-top:2px;}
+.wellness-mobile-chips{display:flex; flex-wrap:wrap; gap:6px; margin-top:10px;}
+.video-hover-preview{position:absolute; z-index:9999; width:320px; border-radius:12px; overflow:hidden; background:#000; box-shadow:0 12px 40px rgba(0,0,0,0.55); border:2px solid var(--red); pointer-events:none;}
+.video-hover-preview iframe{display:block; width:100%; height:180px; border:0;}
+.video-hover-preview .vhp-label{background:var(--bg-panel); color:var(--white); font-size:11.5px; font-weight:600; padding:6px 10px; font-family:var(--font-body);}
 .day-tab-btn:hover{border-color:var(--red);}
 .day-tab-btn.active{background:var(--red); border-color:var(--red); color:var(--white);}
 .day-tab-panel{}
@@ -809,6 +818,7 @@ const EVENT_TYPES = ['Partido','Entrenamiento','Descanso','Viaje','Otro'];
 const PF_NAV = [
   {view:'dashboard', icon:'◈', label:'Panel general'},
   {view:'roster', icon:'◉', label:'Jugadoras y testeos'},
+  {view:'pf-wellness', icon:'◆', label:'Wellness'},
   {view:'injuries', icon:'✚', label:'Lesiones'},
   {view:'planning', icon:'📋', label:'Planificación'},
   {view:'calendar', icon:'📅', label:'Calendario'},
@@ -1149,6 +1159,26 @@ function wellnessComplianceStats(){
   const neverLogged = STATE.players.filter(p=>!STATE.wellness.some(w=>w.playerId===p.id));
   const missingToday = STATE.players.filter(p=>!loggedToday.includes(p));
   return { loggedTodayCount: loggedToday.length, total: STATE.players.length, avgDaysLogged: avg(daysLoggedPerPlayer), neverLogged, missingToday };
+}
+function playerWellnessAverages(pid, days=7){
+  const today = todayStr();
+  const cutoff = (()=>{ const d=new Date(today+'T00:00:00'); d.setDate(d.getDate()-(days-1)); return d.toISOString().slice(0,10); })();
+  const recent = STATE.wellness.filter(w=>w.playerId===pid && w.date>=cutoff && w.date<=today);
+  const all = STATE.wellness.filter(w=>w.playerId===pid).sort((a,b)=>a.date.localeCompare(b.date));
+  const last = all.length ? all[all.length-1] : null;
+  if(!recent.length) return { n:0, sleep:null, fatigue:null, soreness:null, mood:null, load:null, rpeFisico:null, rpePelota:null, lastDate: last?last.date:null, injured: last?!!last.injured:false };
+  return {
+    n: recent.length,
+    sleep: avg(recent.map(w=>Number(w.sleepHours))),
+    fatigue: avg(recent.map(w=>Number(w.fatigue))),
+    soreness: avg(recent.map(w=>Number(w.soreness))),
+    mood: avg(recent.map(w=>Number(w.mood))),
+    load: avg(recent.map(w=>sessionLoad(w))),
+    rpeFisico: avg(recent.filter(w=>w.rpeFisico!==undefined).map(w=>Number(w.rpeFisico))),
+    rpePelota: avg(recent.filter(w=>w.rpePelota!==undefined).map(w=>Number(w.rpePelota))),
+    lastDate: last.date,
+    injured: !!last.injured
+  };
 }
 function nextMatchInfo(){
   const today = todayStr();
@@ -1964,6 +1994,7 @@ function render(){
   else if(currentView==='injuries') root.innerHTML = viewInjuries();
   else if(currentView==='reports') root.innerHTML = viewReports();
   else if(currentView==='analysis') root.innerHTML = viewAnalysis();
+  else if(currentView==='pf-wellness') root.innerHTML = viewPfWellness();
   else if(currentView==='notifications') root.innerHTML = viewNotifications();
   else if(currentView==='calendar') root.innerHTML = viewCalendar();
   else if(currentView==='planning') root.innerHTML = viewPlanning();
@@ -2035,6 +2066,78 @@ function buildAlerts(){
 /* =============================== ROSTER + TESTEOS (PF) =============================== */
 let rosterTab='plantel';
 let selectedPlayerForProfile=null;
+let pfWellnessSelectedPlayer=null;
+function viewPfWellness(){
+  if(pfWellnessSelectedPlayer && getPlayer(pfWellnessSelectedPlayer)){
+    return `
+    <button class="btn secondary sm" id="btn-back-pfwellness" style="margin-bottom:14px;">← Volver al listado</button>
+    <div id="analysis-body"></div>`;
+  }
+  pfWellnessSelectedPlayer = null;
+  const compliance = wellnessComplianceStats();
+  const rows = STATE.players.slice().sort((a,b)=>a.name.localeCompare(b.name,'es')).map(p=>({
+    p, avgs: playerWellnessAverages(p.id, 7), metrics: computeLoadMetrics(p.id)
+  }));
+  const fmt1 = (n)=> n!==null && !isNaN(n) ? n.toFixed(1) : '—';
+  return `
+  <div class="grid grid-3" style="margin-bottom:16px;">
+    <div class="card"><div class="muted" style="font-size:11px;">CARGARON HOY</div><div class="kpi-big">${compliance.loggedTodayCount}/${compliance.total}</div></div>
+    <div class="card"><div class="muted" style="font-size:11px;">PROMEDIO DÍAS CARGADOS (ÚLT. 7)</div><div class="kpi-big">${compliance.avgDaysLogged.toFixed(1)}/7</div></div>
+    <div class="card"><div class="muted" style="font-size:11px;">NUNCA CARGARON WELLNESS</div><div class="kpi-big">${compliance.neverLogged.length}</div></div>
+  </div>
+
+  <!-- Vista de escritorio: tabla completa con todo el detalle -->
+  <div class="card only-desktop">
+    <h3>Promedios de los últimos 7 días, por jugadora</h3>
+    <div class="section-sub">Tocá una jugadora para ver su historial completo, evolución del score y carga.</div>
+    <div style="overflow-x:auto;">
+    <table>
+      <thead><tr>
+        <th>Jugadora</th><th>Últ. check-in</th><th>😴 Sueño</th><th>😮‍💨 Fatiga</th><th>🦵 Dolor</th><th>🙂 Ánimo</th>
+        <th>PSE Físico</th><th>PSE Pelota</th><th>Carga prom.</th><th>ACWR</th><th>Estado</th>
+      </tr></thead>
+      <tbody>
+      ${rows.map(({p,avgs,metrics})=>{ const acwrB = acwrBadge(metrics.acwr); return `
+        <tr class="clickable-row" data-pfwellness-player="${p.id}">
+          <td><b>${p.name}</b></td>
+          <td>${avgs.lastDate? fmtDate(avgs.lastDate) : '<span class="muted">Sin datos</span>'}</td>
+          <td>${avgs.sleep!==null? fmt1(avgs.sleep)+'h' : '—'}</td>
+          <td>${fmt1(avgs.fatigue)}</td>
+          <td>${fmt1(avgs.soreness)}</td>
+          <td>${fmt1(avgs.mood)}</td>
+          <td>${fmt1(avgs.rpeFisico)}</td>
+          <td>${fmt1(avgs.rpePelota)}</td>
+          <td>${avgs.load!==null? Math.round(avgs.load) : '—'}</td>
+          <td>${metrics.acwr!==null? `<span class="badge ${acwrB.cls}">${metrics.acwr.toFixed(2)}</span>` : '—'}</td>
+          <td>${avgs.injured? '<span class="badge danger">Lesionada</span>' : '<span class="badge ok">OK</span>'}</td>
+        </tr>`; }).join('')}
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <!-- Vista mobile: tarjetas simples, foco en lo esencial -->
+  <div class="only-mobile">
+    ${rows.map(({p,avgs})=>{
+      const fatigueBad = avgs.fatigue!==null && avgs.fatigue>=4;
+      const sorenessBad = avgs.soreness!==null && avgs.soreness>=4;
+      return `
+      <div class="wellness-mobile-card clickable-row" data-pfwellness-player="${p.id}">
+        <div class="wellness-mobile-top">
+          <b>${p.name}</b>
+          ${avgs.injured? '<span class="badge danger">Lesionada</span>' : ''}
+        </div>
+        <div class="wellness-mobile-sub muted">Últ. check-in: ${avgs.lastDate? fmtDate(avgs.lastDate) : 'sin datos'}</div>
+        <div class="wellness-mobile-chips">
+          <span class="chip" style="${fatigueBad?'border-color:var(--red); color:#ff8296;':''}">😮‍💨 Fatiga ${fmt1(avgs.fatigue)}</span>
+          <span class="chip" style="${sorenessBad?'border-color:var(--red); color:#ff8296;':''}">🦵 Dolor ${fmt1(avgs.soreness)}</span>
+          <span class="chip">🙂 Ánimo ${fmt1(avgs.mood)}</span>
+          <span class="chip">😴 ${avgs.sleep!==null?fmt1(avgs.sleep)+'h':'—'}</span>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
 function viewRoster(){
   return `
   <div class="tabs">
@@ -3825,20 +3928,37 @@ function individualPlanTabHTML(){
 }
 function editablePlanItemsHTML(items){
   if(!items.length) return '<div class="empty-state">Sin ejercicios todavía.</div>';
-  return items.map((it, idx)=>{
+  const hasAnyDay = items.some(it=>it.day);
+  if(!hasAnyDay) return editablePlanItemsSequence(items, items.map((_,i)=>i));
+  const dayGroups = DAYS_OF_WEEK.map(day=>({day, idxs: items.map((it,i)=>i).filter(i=>items[i].day===day)})).filter(g=>g.idxs.length);
+  const noDay = items.map((it,i)=>i).filter(i=>!items[i].day);
+  if(noDay.length) dayGroups.push({day:'Sin día asignado', idxs:noDay});
+  if(dayGroups.length<=1) return dayGroups.map(g=>editablePlanItemsSequence(items, g.idxs)).join('');
+  const uid = 'daytabs-'+(dayTabsCounter++);
+  return `
+  <div class="day-tabs" data-daytabs="${uid}">
+    ${dayGroups.map((g,i)=>`<button type="button" class="day-tab-btn ${i===0?'active':''}" data-daytab="${uid}-${i}">${g.day}</button>`).join('')}
+  </div>
+  ${dayGroups.map((g,i)=>`<div class="day-tab-panel" data-daypanel="${uid}-${i}" style="display:${i===0?'block':'none'};">${editablePlanItemsSequence(items, g.idxs)}</div>`).join('')}
+  `;
+}
+function editablePlanItemsSequence(items, idxs){
+  return idxs.map((idx,pos)=>{
+    const it = items[idx];
     const ex = STATE.exercises.find(e=>e.id===it.exerciseId);
     if(!ex) return '';
     const style = CATEGORY_STYLE[ex.category] || {icon:'🔹', color:'var(--ink-dim)'};
     return `
     <div class="plan-exercise-editable" style="border-left-color:${style.color};">
       <div class="plan-order-controls">
-        <button type="button" class="btn ghost sm plan-move-up" data-idx="${idx}" ${idx===0?'disabled':''}>▲</button>
-        <button type="button" class="btn ghost sm plan-move-down" data-idx="${idx}" ${idx===items.length-1?'disabled':''}>▼</button>
+        <button type="button" class="btn ghost sm plan-move-up" data-idx="${idx}" ${pos===0?'disabled':''}>▲</button>
+        <button type="button" class="btn ghost sm plan-move-down" data-idx="${idx}" ${pos===idxs.length-1?'disabled':''}>▼</button>
       </div>
       <div class="plan-exercise-body">
-        <div class="plan-exercise-cat" style="color:${style.color};">${style.icon} ${ex.category}${it.day?' · '+it.day:''}</div>
+        <div class="plan-exercise-cat" style="color:${style.color};">${style.icon} ${ex.category}</div>
         <div class="plan-exercise-name">${it.label?`<span class="badge info" style="margin-right:6px;">${it.label}</span>`:''}${ex.name}${it.sets?` <span class="badge info">${it.sets}</span>`:''}</div>
         ${it.notes? `<div class="plan-exercise-note">📝 ${it.notes}</div>`:''}
+        ${ex.videoUrl? `<button type="button" class="video-link plan-preview-video" data-videourl="${ex.videoUrl}" data-exname="${ex.name.replace(/"/g,'&quot;')}" style="border:1.5px solid var(--red); background:none; cursor:pointer; font-family:inherit;">👁 Previsualizar video</button>`:''}
       </div>
       <div class="plan-item-actions">
         <button type="button" class="btn ghost sm plan-edit-item" data-idx="${idx}">✏️</button>
@@ -3846,6 +3966,63 @@ function editablePlanItemsHTML(items){
       </div>
     </div>`;
   }).join('');
+}
+function moveItemWithinDay(items, idx, direction){
+  const day = items[idx].day;
+  const sameDay = items.map((it,i)=>i).filter(i=>items[i].day===day);
+  const pos = sameDay.indexOf(idx);
+  const targetPos = pos + direction;
+  if(targetPos<0 || targetPos>=sameDay.length) return false;
+  const targetIdx = sameDay[targetPos];
+  [items[idx], items[targetIdx]] = [items[targetIdx], items[idx]];
+  return true;
+}
+function youtubeEmbedUrl(url){
+  if(!url) return null;
+  let id = null;
+  let m = url.match(/[?&]v=([a-zA-Z0-9_-]{6,})/); if(m) id = m[1];
+  if(!id){ m = url.match(/youtu\.be\/([a-zA-Z0-9_-]{6,})/); if(m) id = m[1]; }
+  if(!id){ m = url.match(/\/shorts\/([a-zA-Z0-9_-]{6,})/); if(m) id = m[1]; }
+  return id ? `https://www.youtube.com/embed/${id}` : null;
+}
+let activeHoverPreview = null;
+function wireVideoHoverPreview(){
+  if(!window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+  document.querySelectorAll('.plan-preview-video').forEach(btn=>{
+    btn.addEventListener('mouseenter', ()=>{
+      const embed = youtubeEmbedUrl(btn.dataset.videourl);
+      if(!embed) return;
+      if(activeHoverPreview) activeHoverPreview.remove();
+      const box = document.createElement('div');
+      box.className = 'video-hover-preview';
+      box.innerHTML = `<div class="vhp-label">▶ ${btn.dataset.exname}</div><iframe src="${embed}?autoplay=1&mute=1" allow="autoplay; encrypted-media" frameborder="0"></iframe>`;
+      document.body.appendChild(box);
+      const rect = btn.getBoundingClientRect();
+      const left = Math.min(Math.max(8, rect.left), window.innerWidth - 336);
+      box.style.left = left + 'px';
+      box.style.top = (rect.bottom + window.scrollY + 8) + 'px';
+      activeHoverPreview = box;
+    });
+    btn.addEventListener('mouseleave', ()=>{
+      if(activeHoverPreview){ activeHoverPreview.remove(); activeHoverPreview = null; }
+    });
+  });
+}
+function openVideoPreviewModal(videoUrl, exerciseName){
+  const embed = youtubeEmbedUrl(videoUrl);
+  const modal = document.getElementById('modal-root');
+  modal.innerHTML = `
+  <div class="modal-overlay" id="modal-overlay">
+    <div class="modal" style="position:relative; max-width:640px;">
+      <button class="close-x" id="modal-close">✕</button>
+      <h3 style="margin-bottom:14px;">${exerciseName||'Video del ejercicio'}</h3>
+      ${embed ? `<div style="position:relative; width:100%; padding-top:56.25%; border-radius:10px; overflow:hidden; background:#000;">
+        <iframe src="${embed}" style="position:absolute; top:0; left:0; width:100%; height:100%; border:0;" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+      </div>` : `<div class="empty-state">No se pudo previsualizar este video acá. <a href="${videoUrl}" target="_blank" rel="noopener" class="video-link">▶ Abrirlo en YouTube</a></div>`}
+    </div>
+  </div>`;
+  document.getElementById('modal-overlay').addEventListener('click', (e)=>{ if(e.target.id==='modal-overlay') modal.innerHTML=''; });
+  document.getElementById('modal-close').addEventListener('click', ()=>{ modal.innerHTML=''; });
 }
 function openEditExerciseModal(exId){
   const ex = STATE.exercises.find(e=>e.id===exId);
@@ -3994,15 +4171,13 @@ function wireEditablePlanItems(containerId, getPlan, saveFn){
   container.querySelectorAll('.plan-move-up').forEach(btn=>btn.addEventListener('click', async ()=>{
     const plan = getPlan(); if(!plan) return;
     const idx = Number(btn.dataset.idx);
-    if(idx<=0) return;
-    [plan.items[idx-1], plan.items[idx]] = [plan.items[idx], plan.items[idx-1]];
+    if(!moveItemWithinDay(plan.items, idx, -1)) return;
     await saveFn(); renderPlanningTab();
   }));
   container.querySelectorAll('.plan-move-down').forEach(btn=>btn.addEventListener('click', async ()=>{
     const plan = getPlan(); if(!plan) return;
     const idx = Number(btn.dataset.idx);
-    if(idx>=plan.items.length-1) return;
-    [plan.items[idx+1], plan.items[idx]] = [plan.items[idx], plan.items[idx+1]];
+    if(!moveItemWithinDay(plan.items, idx, 1)) return;
     await saveFn(); renderPlanningTab();
   }));
   container.querySelectorAll('.plan-del-item').forEach(btn=>btn.addEventListener('click', async ()=>{
@@ -4016,6 +4191,11 @@ function wireEditablePlanItems(containerId, getPlan, saveFn){
     const idx = Number(btn.dataset.idx);
     openEditPlanItemModal(plan, idx, saveFn);
   }));
+  container.querySelectorAll('.plan-preview-video').forEach(btn=>btn.addEventListener('click', ()=>{
+    openVideoPreviewModal(btn.dataset.videourl, btn.dataset.exname);
+  }));
+  wireVideoHoverPreview();
+  wireDayTabs();
 }
 function openEditPlanItemModal(plan, idx, saveFn){
   const item = plan.items[idx];
@@ -4240,6 +4420,16 @@ function openPainEditor(part){
 /* =============================== WELLNESS (Jugadora) =============================== */
 let wellnessDraft = null;
 let rpeTouched = {fisico:false, pelota:false};
+let wellnessTargetDate = null;
+function missingWellnessDays(playerId){
+  const out = [];
+  for(let i=1;i<=6;i++){
+    const d = new Date(); d.setDate(d.getDate()-i);
+    const ds = d.toISOString().slice(0,10);
+    if(!STATE.wellness.some(w=>w.playerId===playerId && w.date===ds)) out.push(ds);
+  }
+  return out;
+}
 function emojiRow(name, levels, current){
   return `<div class="emoji-row" data-scale="${name}">${levels.map((lv,i)=>`<button type="button" class="emoji-btn ${current===i+1?'active':''}" data-val="${i+1}"><div class="emoji-btn-icon">${lv.e}</div><div class="emoji-btn-label">${lv.l}</div></button>`).join('')}</div>`;
 }
@@ -4252,8 +4442,12 @@ function updateLoadBadge(){
 }
 function viewWellness(){
   const p = activePlayer();
-  const todayEntry = STATE.wellness.find(w=>w.playerId===p.id && w.date===todayStr());
+  if(!wellnessTargetDate) wellnessTargetDate = todayStr();
+  const targetDate = wellnessTargetDate;
+  const isToday = targetDate===todayStr();
+  const todayEntry = STATE.wellness.find(w=>w.playerId===p.id && w.date===targetDate);
   const myCats = playerCategories(p);
+  const missingDays = missingWellnessDays(p.id);
   wellnessDraft = todayEntry ? {
     sleepHours:Number(todayEntry.sleepHours), fatigue:Number(todayEntry.fatigue), soreness:Number(todayEntry.soreness), mood:Number(todayEntry.mood),
     ball:Number(todayEntry.ball||0), fitness:Number(todayEntry.fitness||0), match:Number(todayEntry.match||0),
@@ -4263,8 +4457,21 @@ function viewWellness(){
   rpeTouched = { fisico: !!todayEntry, pelota: !!todayEntry };
   selectedPainAreas = todayEntry ? JSON.parse(JSON.stringify(todayEntry.painAreas||[])) : [];
   return `
+  ${missingDays.length && isToday ? `
+  <div class="card" style="margin-bottom:16px; border:1.5px solid var(--amber); background:rgba(227,168,87,0.08);">
+    <h3>⏰ Te faltan check-ins de días anteriores</h3>
+    <div class="section-sub">Se te pasaron estos días — completarlos igual ayuda a que el cuerpo técnico tenga tu info completa.</div>
+    <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:10px;">
+      ${missingDays.map(d=>`<button type="button" class="btn secondary" data-fill-day="${d}" style="padding:7px 14px; font-size:12.5px;">Completar ${fmtDate(d)}</button>`).join('')}
+    </div>
+  </div>` : ''}
+  ${!isToday ? `
+  <div class="card" style="margin-bottom:16px; border:1.5px solid var(--blue); background:rgba(95,140,167,0.08); display:flex; align-items:center; justify-content:space-between; gap:10px;">
+    <div>📅 Estás completando el check-in atrasado del <b>${fmtDate(targetDate)}</b></div>
+    <button type="button" class="btn secondary" id="btn-back-today" style="padding:7px 14px; font-size:12.5px; flex-shrink:0;">Volver a hoy</button>
+  </div>` : ''}
   <div class="card" style="margin-bottom:16px;">
-    <h3>¿Cómo llegás hoy, ${p.name.split(' ')[0]}? — ${fmtDate(todayStr())}</h3>
+    <h3>¿Cómo llegaste ${isToday?'hoy':`el ${fmtDate(targetDate)}`}, ${p.name.split(' ')[0]}? — ${fmtDate(targetDate)}</h3>
     <div class="field-wrap"><label class="field">🌙 Horas de sueño: <span id="w-sleep-display">${wellnessDraft.sleepHours}</span>h</label><input type="range" min="4" max="10" step="0.5" id="w-sleep" value="${wellnessDraft.sleepHours}"></div>
     <div class="field-wrap"><label class="field">Fatiga percibida</label>${emojiRow('fatigue',FATIGUE_LEVELS,wellnessDraft.fatigue)}</div>
     <div class="field-wrap"><label class="field">Dolor muscular general</label>${emojiRow('soreness',SORENESS_LEVELS,wellnessDraft.soreness)}</div>
@@ -4284,8 +4491,8 @@ function viewWellness(){
     </div>
   </div>
   <div class="card" style="margin-bottom:16px;">
-    <h3>Carga de entrenamiento de hoy</h3>
-    ${myCats.length>1? `<div class="field-wrap"><label class="field">¿Con qué categoría entrenaste/jugaste hoy?</label><select id="w-daycategory">${myCats.map(c=>`<option ${wellnessDraft.dayCategory===c?'selected':''}>${c}</option>`).join('')}</select></div>` : ''}
+    <h3>Carga de entrenamiento de ${isToday?'hoy':'ese día'}</h3>
+    ${myCats.length>1? `<div class="field-wrap"><label class="field">¿Con qué categoría entrenaste/jugaste?</label><select id="w-daycategory">${myCats.map(c=>`<option ${wellnessDraft.dayCategory===c?'selected':''}>${c}</option>`).join('')}</select></div>` : ''}
     <div class="load-row" data-type="ball">
       <div class="load-icon" style="background:rgba(95,140,167,0.18); color:var(--blue);">🤾</div>
       <div class="load-body">
@@ -4329,7 +4536,7 @@ function viewWellness(){
     <div class="load-total"><span class="muted">Carga total de la sesión: <b id="w-load-val" style="color:var(--white); font-family:var(--font-mono);">${sessionLoad({...wellnessDraft})}</b></span><span class="badge" id="w-total-badge"></span></div>
   </div>
   <div class="card" style="margin-bottom:16px;">
-    <h3>¿Dónde sentís molestias hoy?</h3>
+    <h3>¿Dónde sentís molestias ${isToday?'hoy':'ese día'}?</h3>
     <div class="section-sub">Tocá una zona — el nombre ya aparece escrito sobre el cuerpo — y ajustá la escala de dolor</div>
     <div class="body-diagram-wrap">
       <div class="body-svg-box"><span>Vista frontal</span>${buildBodySVG(BODY_PARTS_FRONT,'front')}</div>
@@ -4338,7 +4545,7 @@ function viewWellness(){
     <div id="pain-chips" style="margin-top:14px;"></div>
     <div id="pain-editor" style="margin-top:10px;"></div>
   </div>
-  <button class="btn save-wellness-btn" id="btn-save-wellness">💾 Guardar check-in de hoy</button>
+  <button class="btn save-wellness-btn" id="btn-save-wellness">💾 ${isToday? 'Guardar check-in de hoy' : `Guardar check-in del ${fmtDate(targetDate)}`}</button>
   `;
 }
 function showAnalysisModal(rec){
@@ -4446,6 +4653,14 @@ function afterRender(){
     const sel = document.getElementById('an-player');
     sel.addEventListener('change',()=>renderAnalysisBody(sel.value));
     renderAnalysisBody(sel.value);
+  }
+  if(currentView==='pf-wellness'){
+    if(pfWellnessSelectedPlayer){
+      renderAnalysisBody(pfWellnessSelectedPlayer);
+      document.getElementById('btn-back-pfwellness').addEventListener('click', ()=>{ pfWellnessSelectedPlayer=null; render(); });
+    } else {
+      document.querySelectorAll('[data-pfwellness-player]').forEach(row=>row.addEventListener('click', ()=>{ pfWellnessSelectedPlayer=row.dataset.pfwellnessPlayer; render(); }));
+    }
   }
   if(currentView==='my-tests'){ drawProfileCharts(SESSION.playerId); }
   if(currentView==='planning'){
@@ -4567,9 +4782,10 @@ function afterRender(){
       if(!rpeTouched.fisico || !rpeTouched.pelota){ toast('Marcá la PSE Físico y la PSE Pelota antes de guardar'); return; }
       const p = activePlayer();
       const myCats = playerCategories(p);
+      const saveDate = wellnessTargetDate || todayStr();
       const dayCategoryEl = document.getElementById('w-daycategory');
       const entryData = {
-        id: uid(), playerId:p.id, date: todayStr(),
+        id: uid(), playerId:p.id, date: saveDate,
         sleepHours: wellnessDraft.sleepHours, fatigue: wellnessDraft.fatigue, soreness: wellnessDraft.soreness, mood: wellnessDraft.mood,
         cyclePhase: wellnessDraft.cyclePhase,
         injured: document.getElementById('w-injured').value==='si', kinesio: document.getElementById('w-injured').value==='si' ? (document.getElementById('w-kine').value==='si') : false,
@@ -4577,13 +4793,20 @@ function afterRender(){
         dayCategory: dayCategoryEl ? dayCategoryEl.value : (myCats[0] || ''),
         painAreas: selectedPainAreas
       };
-      const existingIdx = STATE.wellness.findIndex(w=>w.playerId===p.id && w.date===todayStr());
+      const existingIdx = STATE.wellness.findIndex(w=>w.playerId===p.id && w.date===saveDate);
       if(existingIdx>-1){ entryData.id=STATE.wellness[existingIdx].id; STATE.wellness[existingIdx]=entryData; } else STATE.wellness.push(entryData);
       await saveWellnessEntry(entryData);
       const computed = computeAnalysisFromEntry(entryData);
       const rec = await upsertAnalysis(p.id, entryData.date, computed);
+      wellnessTargetDate = todayStr();
       showAnalysisModal(rec);
     });
+    document.querySelectorAll('[data-fill-day]').forEach(btn=>btn.addEventListener('click', ()=>{
+      wellnessTargetDate = btn.dataset.fillDay;
+      render();
+    }));
+    const backTodayBtn = document.getElementById('btn-back-today');
+    if(backTodayBtn) backTodayBtn.addEventListener('click', ()=>{ wellnessTargetDate = todayStr(); render(); });
   }
   if(currentView==='settings'){
     document.querySelectorAll('[data-accent]').forEach(dot=>dot.addEventListener('click', async ()=>{
