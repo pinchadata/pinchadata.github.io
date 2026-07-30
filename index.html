@@ -2067,6 +2067,19 @@ function buildAlerts(){
 let rosterTab='plantel';
 let selectedPlayerForProfile=null;
 let pfWellnessSelectedPlayer=null;
+function wellnessValueColor(type, value){
+  if(value===null || value===undefined || isNaN(value)) return null;
+  const v = Number(value);
+  if(type==='sleep'){ if(v>=7.5) return 'var(--green)'; if(v<6) return '#ff8296'; return null; }
+  if(type==='fatigue'){ if(v<=2) return 'var(--green)'; if(v>=4) return '#ff8296'; return null; }
+  if(type==='soreness'){ if(v<=2) return 'var(--green)'; if(v>=4) return '#ff8296'; return null; }
+  if(type==='mood'){ if(v>=4) return 'var(--green)'; if(v<=2) return '#ff8296'; return null; }
+  return null;
+}
+function wellnessValSpan(type, value, text){
+  const c = wellnessValueColor(type, value);
+  return c ? `<span style="color:${c}; font-weight:700;">${text}</span>` : text;
+}
 function viewPfWellness(){
   if(pfWellnessSelectedPlayer && getPlayer(pfWellnessSelectedPlayer)){
     return `
@@ -2101,10 +2114,10 @@ function viewPfWellness(){
         <tr class="clickable-row" data-pfwellness-player="${p.id}">
           <td><b>${p.name}</b></td>
           <td>${avgs.lastDate? fmtDate(avgs.lastDate) : '<span class="muted">Sin datos</span>'}</td>
-          <td>${avgs.sleep!==null? fmt1(avgs.sleep)+'h' : '—'}</td>
-          <td>${fmt1(avgs.fatigue)}</td>
-          <td>${fmt1(avgs.soreness)}</td>
-          <td>${fmt1(avgs.mood)}</td>
+          <td>${avgs.sleep!==null? wellnessValSpan('sleep', avgs.sleep, fmt1(avgs.sleep)+'h') : '—'}</td>
+          <td>${wellnessValSpan('fatigue', avgs.fatigue, fmt1(avgs.fatigue))}</td>
+          <td>${wellnessValSpan('soreness', avgs.soreness, fmt1(avgs.soreness))}</td>
+          <td>${wellnessValSpan('mood', avgs.mood, fmt1(avgs.mood))}</td>
           <td>${fmt1(avgs.rpeFisico)}</td>
           <td>${fmt1(avgs.rpePelota)}</td>
           <td>${avgs.load!==null? Math.round(avgs.load) : '—'}</td>
@@ -2119,8 +2132,6 @@ function viewPfWellness(){
   <!-- Vista mobile: tarjetas simples, foco en lo esencial -->
   <div class="only-mobile">
     ${rows.map(({p,avgs})=>{
-      const fatigueBad = avgs.fatigue!==null && avgs.fatigue>=4;
-      const sorenessBad = avgs.soreness!==null && avgs.soreness>=4;
       return `
       <div class="wellness-mobile-card clickable-row" data-pfwellness-player="${p.id}">
         <div class="wellness-mobile-top">
@@ -2129,10 +2140,10 @@ function viewPfWellness(){
         </div>
         <div class="wellness-mobile-sub muted">Últ. check-in: ${avgs.lastDate? fmtDate(avgs.lastDate) : 'sin datos'}</div>
         <div class="wellness-mobile-chips">
-          <span class="chip" style="${fatigueBad?'border-color:var(--red); color:#ff8296;':''}">😮‍💨 Fatiga ${fmt1(avgs.fatigue)}</span>
-          <span class="chip" style="${sorenessBad?'border-color:var(--red); color:#ff8296;':''}">🦵 Dolor ${fmt1(avgs.soreness)}</span>
-          <span class="chip">🙂 Ánimo ${fmt1(avgs.mood)}</span>
-          <span class="chip">😴 ${avgs.sleep!==null?fmt1(avgs.sleep)+'h':'—'}</span>
+          <span class="chip">😮‍💨 Fatiga ${wellnessValSpan('fatigue', avgs.fatigue, fmt1(avgs.fatigue))}</span>
+          <span class="chip">🦵 Dolor ${wellnessValSpan('soreness', avgs.soreness, fmt1(avgs.soreness))}</span>
+          <span class="chip">🙂 Ánimo ${wellnessValSpan('mood', avgs.mood, fmt1(avgs.mood))}</span>
+          <span class="chip">😴 ${avgs.sleep!==null? wellnessValSpan('sleep', avgs.sleep, fmt1(avgs.sleep)+'h') : '—'}</span>
         </div>
       </div>`;
     }).join('')}
@@ -3456,6 +3467,30 @@ function renderAnalysisBody(pid){
     <h3>Wellness y carga según fase del ciclo menstrual</h3>
     ${cycleStats.length? `<div class="chart-box short"><canvas id="chart-cycle-phase"></canvas></div>` : '<div class="empty-state">Sin registros suficientes para este análisis todavía.</div>'}
   </div>
+  <div class="card" style="margin-bottom:16px;">
+    <h3>Molestias y zonas de dolor reportadas</h3>
+    <div class="section-sub">Detalle completo de cada zona marcada por la jugadora en su wellness diario, con su nota.</div>
+    ${(()=>{
+      const withPain = myWellness.filter(w=>w.painAreas && w.painAreas.length).slice().reverse();
+      if(!withPain.length) return '<div class="empty-state">Sin molestias reportadas en el historial.</div>';
+      return withPain.map(w=>`
+        <div class="injury-row" style="align-items:flex-start; flex-direction:column; gap:8px;">
+          <div style="display:flex; align-items:center; gap:8px; width:100%;">
+            <b>${fmtDate(w.date)}</b>
+            ${w.injured? '<span class="badge danger">Reportó lesión activa ese día</span>':''}
+          </div>
+          ${w.painAreas.map(a=>{
+            const cls = a.scale>=7?'danger':a.scale>=4?'warn':'ok';
+            return `<div style="width:100%; background:var(--bg-raise); border-radius:10px; padding:10px 14px; border-left:3px solid ${a.scale>=7?'var(--red)':a.scale>=4?'var(--amber)':'var(--green)'};">
+              <div style="display:flex; align-items:center; justify-content:space-between;">
+                <b>${a.part}</b><span class="badge ${cls}">${a.scale}/10</span>
+              </div>
+              ${a.note? `<div class="muted" style="margin-top:4px; font-style:italic;">"${a.note}"</div>` : '<div class="muted" style="margin-top:4px;">Sin nota adicional</div>'}
+            </div>`;
+          }).join('')}
+        </div>`).join('');
+    })()}
+  </div>
   <div class="card"><h3>Historial de resultados</h3>
   ${records.slice().reverse().map(r=>`
     <div class="injury-row" style="align-items:flex-start;">
@@ -4422,11 +4457,19 @@ let wellnessDraft = null;
 let rpeTouched = {fisico:false, pelota:false};
 let wellnessTargetDate = null;
 let wellnessForceEdit = null;
+let wellnessVoluntaryToday = false;
+function isTrainingOrMatchDay(playerId, dateStr){
+  const p = getPlayer(playerId);
+  if(!p) return false;
+  const myCats = playerCategories(p);
+  return STATE.events.some(e=> e.date===dateStr && (e.type==='Entrenamiento'||e.type==='Partido') && (e.category==='Ambas' || myCats.includes(e.category)) );
+}
 function missingWellnessDays(playerId){
   const out = [];
   for(let i=1;i<=6;i++){
     const d = new Date(); d.setDate(d.getDate()-i);
     const ds = d.toISOString().slice(0,10);
+    if(!isTrainingOrMatchDay(playerId, ds)) continue;
     if(!STATE.wellness.some(w=>w.playerId===playerId && w.date===ds)) out.push(ds);
   }
   return out;
@@ -4480,6 +4523,15 @@ function viewWellness(){
   if(!isToday){
     return banners + wellnessPreFormHTML(p, targetDate, isToday) + wellnessPostFormHTML(p, targetDate, isToday, myCats)
       + `<button class="btn save-wellness-btn" id="btn-save-wellness-full">💾 Guardar check-in completo del ${fmtDate(targetDate)}</button>`;
+  }
+  // Hoy no hay entrenamiento ni partido programado en el calendario para esta jugadora
+  if(isToday && !isTrainingOrMatchDay(p.id, targetDate) && !wellnessVoluntaryToday){
+    return banners + `
+    <div class="card" style="margin-bottom:16px;">
+      <h3>📅 Hoy no tenés entrenamiento ni partido programado</h3>
+      <div class="section-sub">Según el calendario, hoy no hay actividad para tu categoría — no hace falta que completes el wellness. Si igual entrenaste o querés cargarlo, podés hacerlo.</div>
+      <button type="button" class="btn secondary" id="btn-fill-voluntary" style="margin-top:10px;">Completar wellness de todos modos</button>
+    </div>`;
   }
   // Hoy, pero todavía no completó el wellness de antes de la sesión (o lo está editando a propósito)
   if(!preDone || wellnessForceEdit==='pre'){
@@ -4856,7 +4908,7 @@ function afterRender(){
     const btnPre = document.getElementById('btn-save-wellness-pre');
     if(btnPre) btnPre.addEventListener('click', async ()=>{
       const entryData = await persistWellness({...buildPreFields(), preDone:true});
-      wellnessForceEdit = null;
+      wellnessForceEdit = null; wellnessVoluntaryToday = false;
       toast('Wellness de antes de la sesión guardado. ¡No te olvides de cargar la PSE después de entrenar!');
       render();
     });
@@ -4864,7 +4916,7 @@ function afterRender(){
     if(btnPost) btnPost.addEventListener('click', async ()=>{
       if(!rpeTouched.fisico || !rpeTouched.pelota){ toast('Marcá la PSE Físico y la PSE Pelota antes de guardar'); return; }
       const entryData = await persistWellness({...buildPostFields(), postDone:true});
-      wellnessForceEdit = null;
+      wellnessForceEdit = null; wellnessVoluntaryToday = false;
       const computed = computeAnalysisFromEntry(entryData);
       const rec = await upsertAnalysis(entryData.playerId, entryData.date, computed);
       showAnalysisModal(rec);
@@ -4888,6 +4940,8 @@ function afterRender(){
     if(editPreBtn) editPreBtn.addEventListener('click', ()=>{ wellnessForceEdit='pre'; render(); });
     const editPostBtn = document.getElementById('btn-edit-post');
     if(editPostBtn) editPostBtn.addEventListener('click', ()=>{ wellnessForceEdit='post'; render(); });
+    const fillVoluntaryBtn = document.getElementById('btn-fill-voluntary');
+    if(fillVoluntaryBtn) fillVoluntaryBtn.addEventListener('click', ()=>{ wellnessVoluntaryToday = true; render(); });
   }
   if(currentView==='settings'){
     document.querySelectorAll('[data-accent]').forEach(dot=>dot.addEventListener('click', async ()=>{
