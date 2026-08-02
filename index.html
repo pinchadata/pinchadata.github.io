@@ -894,6 +894,28 @@ const firebaseConfig = {
   messagingSenderId: "1037476088393",
   appId: "1:1037476088393:web:0ba7365440eef06c764d98"
 };
+/* Reemplazar por la clave VAPID generada en Firebase Console → Configuración del proyecto →
+   Cloud Messaging → "Certificados push web" → Generar par de claves. */
+const PUSH_VAPID_KEY = "BLgz9Cgq6zit7L2hWUvw7uzL2bb6-YmqonRIsYyhbkbgZigrTAsGjUDRvHNIAC5pEtmT1ai7XdyQ177oyQ_cEtI";
+let fbMessaging = null;
+let pushPermissionState = 'default'; // 'default' | 'granted' | 'denied' | 'unsupported'
+async function enablePushNotifications(){
+  if(!firebaseReady){ toast('No se pudo conectar con el servidor todavía, probá de nuevo en un momento'); return false; }
+  if(!('Notification' in window) || !('serviceWorker' in navigator)){ pushPermissionState='unsupported'; toast('Este navegador no soporta notificaciones push'); return false; }
+  if(PUSH_VAPID_KEY === 'TU_VAPID_KEY'){ toast('Falta configurar la clave VAPID en el código todavía'); return false; }
+  try{
+    const permission = await Notification.requestPermission();
+    pushPermissionState = permission;
+    if(permission !== 'granted'){ toast('No se activaron las notificaciones (permiso no otorgado)'); return false; }
+    fbMessaging = firebase.messaging();
+    const swReg = await navigator.serviceWorker.ready;
+    const token = await fbMessaging.getToken({ vapidKey: PUSH_VAPID_KEY, serviceWorkerRegistration: swReg });
+    if(!token){ toast('No se pudo generar el token de notificaciones'); return false; }
+    await docSet('pushTokens', SESSION.accountId, { accountId: SESSION.accountId, playerId: SESSION.playerId||null, role: SESSION.role, token, updatedAt: new Date().toISOString() });
+    toast('¡Notificaciones activadas en este dispositivo!');
+    return true;
+  }catch(e){ console.error('Error activando push', e); toast('No se pudieron activar las notificaciones'); return false; }
+}
 let fbDb = null;
 let firebaseReady = false;
 function tryLoadOne(url, timeoutMs){
@@ -926,6 +948,7 @@ async function loadFirebaseSdk(){
     await loadScriptWithFallback([`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-app-compat.js`, `https://cdnjs.cloudflare.com/ajax/libs/firebase/${FB_VER}/firebase-app-compat.js`]);
     await loadScriptWithFallback([`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-firestore-compat.js`, `https://cdnjs.cloudflare.com/ajax/libs/firebase/${FB_VER}/firebase-firestore-compat.js`]);
     await loadScriptWithFallback([`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-auth-compat.js`, `https://cdnjs.cloudflare.com/ajax/libs/firebase/${FB_VER}/firebase-auth-compat.js`]);
+    await loadScriptWithFallback([`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-messaging-compat.js`, `https://cdnjs.cloudflare.com/ajax/libs/firebase/${FB_VER}/firebase-messaging-compat.js`]);
     return true;
   }catch(e){ console.error('No se pudo cargar el SDK de Firebase desde ningún CDN', e); return false; }
 }
@@ -4721,6 +4744,11 @@ function viewSettings(){
     <button class="btn" id="settings-save">Guardar preferencias</button>
   </div>
   <div class="card" style="max-width:640px; margin-top:16px;">
+    <h3>Notificaciones en el celular</h3>
+    <div class="section-sub">Activá esto para recibir un aviso directo en la barra de notificaciones de tu celular, incluso con la app cerrada. Hay que activarlo en cada dispositivo por separado.</div>
+    <button class="btn secondary" id="btn-enable-push" style="margin-top:10px;">🔔 Activar notificaciones en este dispositivo</button>
+  </div>
+  <div class="card" style="max-width:640px; margin-top:16px;">
     <h3>Usuario y contraseña</h3>
     <div class="section-sub">Usuario actual: <b>${(STATE.accounts.find(a=>a.id===SESSION.accountId)||{}).username||'—'}</b></div>
     <div class="field-wrap"><label class="field">Contraseña actual (para confirmar)</label><input type="password" id="acc-current-pw"></div>
@@ -4976,6 +5004,8 @@ function afterRender(){
     });
     const backupBtn = document.getElementById('btn-full-backup');
     if(backupBtn) backupBtn.addEventListener('click', downloadFullBackup);
+    const enablePushBtn = document.getElementById('btn-enable-push');
+    if(enablePushBtn) enablePushBtn.addEventListener('click', enablePushNotifications);
     document.getElementById('btn-save-account').addEventListener('click', async ()=>{
       const acc = STATE.accounts.find(a=>a.id===SESSION.accountId);
       if(!acc){ toast('No se encontró tu cuenta'); return; }
