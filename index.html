@@ -308,15 +308,14 @@ tr:hover td{background:var(--bg-raise);}
 .body-svg-box{text-align:center; flex:1; min-width:220px; max-width:320px;}
 .body-svg-box span{font-size:12px; text-transform:uppercase; letter-spacing:1px; color:var(--ink-dim); display:block; margin-bottom:8px; font-weight:600;}
 .body-svg-box svg{width:100%; height:auto; max-width:300px;}
-.body-part{fill:var(--steel); stroke:#0e0f0d; stroke-width:1.4; cursor:pointer; transition:fill .15s, stroke .15s, filter .15s; filter:drop-shadow(0 2px 3px rgba(0,0,0,0.45));}
-svg[data-view="front"] .body-part, svg[data-view="back"] .body-part{fill:url(#bodyGrad-front);}
-svg[data-view="back"] .body-part{fill:url(#bodyGrad-back);}
-.body-part:hover{fill:var(--blue) !important; stroke:var(--white); filter:drop-shadow(0 2px 5px rgba(95,140,167,0.5));}
+.body-part{fill:none; stroke:none; cursor:pointer; transition:fill .15s, stroke .15s, filter .15s;}
+.body-part:hover{fill:rgba(95,140,167,0.55) !important; stroke:var(--white); stroke-width:1.4;}
 .body-part.selected{fill:url(#bodyGrad-front-sel) !important; stroke:var(--white); stroke-width:2; filter:drop-shadow(0 2px 8px rgba(200,16,46,0.6));}
 svg[data-view="back"] .body-part.selected{fill:url(#bodyGrad-back-sel) !important;}
 .body-part.selected.severe{fill:#7a0a20 !important;}
 .body-part-label{ font-size:7px; fill:rgba(244,242,234,0.75); font-family:'Inter',sans-serif; font-weight:700; text-transform:uppercase; letter-spacing:0.2px; pointer-events:none; }
 .body-part.selected + .body-part-label, .body-part:hover + .body-part-label{ fill:#ffffff; }
+.body-silhouette{ filter:drop-shadow(0 3px 6px rgba(0,0,0,0.5)); pointer-events:none; }
 .body-hint{font-size:11.5px; color:var(--ink-dim); text-align:center; margin-top:10px;}
 .pain-slider-wrap{display:flex; align-items:center; gap:10px;}
 .pain-scale-num{font-family:var(--font-display); font-size:22px; width:34px; text-align:center;}
@@ -2076,6 +2075,17 @@ function buildAlerts(){
   STATE.injuries.filter(i=>i.status!=='De alta').forEach(i=>{
     const p=getPlayer(i.playerId);
     alerts.push({title:`${p?p.name:'?'} — lesión activa`, detail:`${i.type} (${i.severity}) ${i.kinesio?'· asiste a kinesiología':'· no asiste a kinesiología'}`, color: sevColor(i.severity)});
+  });
+  const today = todayStr();
+  STATE.wellness.filter(w=>w.date===today && w.painAreas && w.painAreas.length).forEach(w=>{
+    const p=getPlayer(w.playerId); if(!p) return;
+    const worst = w.painAreas.reduce((max,a)=> a.scale>max.scale?a:max, w.painAreas[0]);
+    const otherCount = w.painAreas.length - 1;
+    alerts.push({
+      title: `${p.name} — marcó molestia hoy`,
+      detail: `${worst.part} (${worst.scale}/10)${worst.note?` — "${worst.note}"`:''}${otherCount>0?` · +${otherCount} zona${otherCount>1?'s':''} más`:''}`,
+      color: worst.scale>=7?'var(--red)':worst.scale>=4?'var(--amber)':'var(--green)'
+    });
   });
   const latestByPlayer = {};
   STATE.analysis.forEach(a=>{ if(!latestByPlayer[a.playerId] || a.date>latestByPlayer[a.playerId].date) latestByPlayer[a.playerId]=a; });
@@ -4420,8 +4430,20 @@ const BODY_PARTS_BACK = [
   {id:'tendon_i', label:'Tendón de Aquiles izq.', x:127, y:316, w:18, h:10}, {id:'tendon_d', label:'Tendón de Aquiles der.', x:155, y:316, w:18, h:10},
   {id:'talon_i', label:'Talón izq.', x:122, y:328, w:26, h:10}, {id:'talon_d', label:'Talón der.', x:152, y:328, w:26, h:10},
 ];
+const BODY_SILHOUETTE = {
+  head: `<ellipse cx="150" cy="28" rx="14" ry="16"/>`,
+  neck: `<path d="M142,42 L142,51 Q150,56 158,51 L158,42 Z"/>`,
+  torso: `<path d="M133.0,50.0 L132.0,51.0 L129.3,52.0 L125.3,53.0 L120.5,54.0 L115.7,55.0 L111.7,56.0 L109.0,57.0 L108.0,58.0 L108.1,60.1 L108.4,62.2 L108.9,64.4 L109.5,66.5 L110.1,68.6 L110.6,70.8 L110.9,72.9 L111.0,75.0 L111.0,77.5 L111.1,80.0 L111.3,82.5 L111.5,85.0 L111.7,87.5 L111.9,90.0 L112.0,92.5 L112.0,95.0 L112.3,97.9 L113.2,100.8 L114.5,103.6 L116.0,106.5 L117.5,109.4 L118.8,112.2 L119.7,115.1 L120.0,118.0 L120.2,120.2 L120.9,122.5 L121.9,124.8 L123.0,127.0 L124.1,129.2 L125.1,131.5 L125.8,133.8 L126.0,136.0 L125.6,138.4 L124.4,140.8 L122.6,143.1 L120.5,145.5 L118.4,147.9 L116.6,150.2 L115.4,152.6 L115.0,155.0 L114.7,156.9 L113.8,158.8 L112.5,160.6 L111.0,162.5 L109.5,164.4 L108.2,166.2 L107.3,168.1 L107.0,170.0 L107.1,172.2 L107.3,174.5 L107.6,176.8 L108.0,179.0 L108.4,181.2 L108.7,183.5 L108.9,185.8 L109.0,188.0 L109.2,190.2 L109.6,192.5 L110.2,194.8 L111.0,197.0 L111.8,199.2 L112.4,201.5 L112.8,203.8 L113.0,206.0 L187.0,206.0 L187.2,203.8 L187.6,201.5 L188.2,199.2 L189.0,197.0 L189.8,194.8 L190.4,192.5 L190.8,190.2 L191.0,188.0 L191.1,185.8 L191.3,183.5 L191.6,181.2 L192.0,179.0 L192.4,176.8 L192.7,174.5 L192.9,172.2 L193.0,170.0 L192.7,168.1 L191.8,166.2 L190.5,164.4 L189.0,162.5 L187.5,160.6 L186.2,158.8 L185.3,156.9 L185.0,155.0 L184.6,152.6 L183.4,150.2 L181.6,147.9 L179.5,145.5 L177.4,143.1 L175.6,140.8 L174.4,138.4 L174.0,136.0 L174.2,133.8 L174.9,131.5 L175.9,129.2 L177.0,127.0 L178.1,124.8 L179.1,122.5 L179.8,120.2 L180.0,118.0 L180.3,115.1 L181.2,112.2 L182.5,109.4 L184.0,106.5 L185.5,103.6 L186.8,100.8 L187.7,97.9 L188.0,95.0 L188.0,92.5 L188.1,90.0 L188.3,87.5 L188.5,85.0 L188.7,82.5 L188.9,80.0 L189.0,77.5 L189.0,75.0 L189.1,72.9 L189.4,70.8 L189.9,68.6 L190.5,66.5 L191.1,64.4 L191.6,62.2 L191.9,60.1 L192.0,58.0 L191.0,57.0 L188.3,56.0 L184.3,55.0 L179.5,54.0 L174.7,53.0 L170.7,52.0 L168.0,51.0 L167.0,50.0 Z"/>`,
+  legL: `<path d="M104.0,204.0 L104.1,206.2 L104.4,208.5 L104.9,210.8 L105.5,213.0 L106.1,215.2 L106.6,217.5 L106.9,219.8 L107.0,222.0 L107.1,224.9 L107.4,227.8 L107.9,230.6 L108.5,233.5 L109.1,236.4 L109.6,239.2 L109.9,242.1 L110.0,245.0 L110.1,247.1 L110.4,249.2 L110.9,251.4 L111.5,253.5 L112.1,255.6 L112.6,257.8 L112.9,259.9 L113.0,262.0 L113.1,264.2 L113.3,266.5 L113.6,268.8 L114.0,271.0 L114.4,273.2 L114.7,275.5 L114.9,277.8 L115.0,280.0 L115.1,282.5 L115.3,285.0 L115.6,287.5 L116.0,290.0 L116.4,292.5 L116.7,295.0 L116.9,297.5 L117.0,300.0 L117.0,301.6 L117.1,303.2 L117.3,304.9 L117.5,306.5 L117.7,308.1 L117.9,309.8 L118.0,311.4 L118.0,313.0 L122.0,313.0 L122.0,311.4 L122.1,309.8 L122.3,308.1 L122.5,306.5 L122.7,304.9 L122.9,303.2 L123.0,301.6 L123.0,300.0 L123.0,297.5 L123.0,295.0 L123.0,292.5 L123.0,290.0 L123.0,287.5 L123.0,285.0 L123.0,282.5 L123.0,280.0 L123.0,277.8 L123.0,275.5 L123.0,273.2 L123.0,271.0 L123.0,268.8 L123.0,266.5 L123.0,264.2 L123.0,262.0 L123.0,259.9 L123.1,257.8 L123.3,255.6 L123.5,253.5 L123.7,251.4 L123.9,249.2 L124.0,247.1 L124.0,245.0 L124.0,242.1 L124.0,239.2 L124.0,236.4 L124.0,233.5 L124.0,230.6 L124.0,227.8 L124.0,224.9 L124.0,222.0 L124.0,219.8 L124.0,217.5 L124.0,215.2 L124.0,213.0 L124.0,210.8 L124.0,208.5 L124.0,206.2 L124.0,204.0 Z"/>`,
+  legR: `<path d="M196.0,204.0 L195.9,206.2 L195.6,208.5 L195.1,210.8 L194.5,213.0 L193.9,215.2 L193.4,217.5 L193.1,219.8 L193.0,222.0 L192.9,224.9 L192.6,227.8 L192.1,230.6 L191.5,233.5 L190.9,236.4 L190.4,239.2 L190.1,242.1 L190.0,245.0 L189.9,247.1 L189.6,249.2 L189.1,251.4 L188.5,253.5 L187.9,255.6 L187.4,257.8 L187.1,259.9 L187.0,262.0 L186.9,264.2 L186.7,266.5 L186.4,268.8 L186.0,271.0 L185.6,273.2 L185.3,275.5 L185.1,277.8 L185.0,280.0 L184.9,282.5 L184.7,285.0 L184.4,287.5 L184.0,290.0 L183.6,292.5 L183.3,295.0 L183.1,297.5 L183.0,300.0 L183.0,301.6 L182.9,303.2 L182.7,304.9 L182.5,306.5 L182.3,308.1 L182.1,309.8 L182.0,311.4 L182.0,313.0 L178.0,313.0 L178.0,311.4 L177.9,309.8 L177.7,308.1 L177.5,306.5 L177.3,304.9 L177.1,303.2 L177.0,301.6 L177.0,300.0 L177.0,297.5 L177.0,295.0 L177.0,292.5 L177.0,290.0 L177.0,287.5 L177.0,285.0 L177.0,282.5 L177.0,280.0 L177.0,277.8 L177.0,275.5 L177.0,273.2 L177.0,271.0 L177.0,268.8 L177.0,266.5 L177.0,264.2 L177.0,262.0 L177.0,259.9 L176.9,257.8 L176.7,255.6 L176.5,253.5 L176.3,251.4 L176.1,249.2 L176.0,247.1 L176.0,245.0 L176.0,242.1 L176.0,239.2 L176.0,236.4 L176.0,233.5 L176.0,230.6 L176.0,227.8 L176.0,224.9 L176.0,222.0 L176.0,219.8 L176.0,217.5 L176.0,215.2 L176.0,213.0 L176.0,210.8 L176.0,208.5 L176.0,206.2 L176.0,204.0 Z"/>`,
+  armL: `<path d="M89.0,56.0 L89.1,58.8 L89.3,61.5 L89.6,64.2 L90.0,67.0 L90.4,69.8 L90.7,72.5 L90.9,75.2 L91.0,78.0 L91.1,80.8 L91.4,83.5 L91.9,86.2 L92.5,89.0 L93.1,91.8 L93.6,94.5 L93.9,97.2 L94.0,100.0 L94.1,103.1 L94.4,106.2 L94.9,109.4 L95.5,112.5 L96.1,115.6 L96.6,118.8 L96.9,121.9 L97.0,125.0 L97.1,128.1 L97.3,131.2 L97.6,134.4 L98.0,137.5 L98.4,140.6 L98.7,143.8 L98.9,146.9 L99.0,150.0 L99.0,152.2 L99.1,154.5 L99.3,156.8 L99.5,159.0 L99.7,161.2 L99.9,163.5 L100.0,165.8 L100.0,168.0 L103.0,168.0 L103.0,165.8 L102.9,163.5 L102.7,161.2 L102.5,159.0 L102.3,156.8 L102.1,154.5 L102.0,152.2 L102.0,150.0 L102.0,146.9 L102.0,143.8 L102.0,140.6 L102.0,137.5 L102.0,134.4 L102.0,131.2 L102.0,128.1 L102.0,125.0 L102.0,121.9 L101.9,118.8 L101.7,115.6 L101.5,112.5 L101.3,109.4 L101.1,106.2 L101.0,103.1 L101.0,100.0 L101.0,97.2 L101.0,94.5 L101.0,91.8 L101.0,89.0 L101.0,86.2 L101.0,83.5 L101.0,80.8 L101.0,78.0 L100.7,75.2 L99.8,72.5 L98.5,69.8 L97.0,67.0 L95.5,64.2 L94.2,61.5 L93.3,58.8 L93.0,56.0 Z"/>`,
+  armR: `<path d="M211.0,56.0 L210.9,58.8 L210.7,61.5 L210.4,64.2 L210.0,67.0 L209.6,69.8 L209.3,72.5 L209.1,75.2 L209.0,78.0 L208.9,80.8 L208.6,83.5 L208.1,86.2 L207.5,89.0 L206.9,91.8 L206.4,94.5 L206.1,97.2 L206.0,100.0 L205.9,103.1 L205.6,106.2 L205.1,109.4 L204.5,112.5 L203.9,115.6 L203.4,118.8 L203.1,121.9 L203.0,125.0 L202.9,128.1 L202.7,131.2 L202.4,134.4 L202.0,137.5 L201.6,140.6 L201.3,143.8 L201.1,146.9 L201.0,150.0 L201.0,152.2 L200.9,154.5 L200.7,156.8 L200.5,159.0 L200.3,161.2 L200.1,163.5 L200.0,165.8 L200.0,168.0 L197.0,168.0 L197.0,165.8 L197.1,163.5 L197.3,161.2 L197.5,159.0 L197.7,156.8 L197.9,154.5 L198.0,152.2 L198.0,150.0 L198.0,146.9 L198.0,143.8 L198.0,140.6 L198.0,137.5 L198.0,134.4 L198.0,131.2 L198.0,128.1 L198.0,125.0 L198.0,121.9 L198.1,118.8 L198.3,115.6 L198.5,112.5 L198.7,109.4 L198.9,106.2 L199.0,103.1 L199.0,100.0 L199.0,97.2 L199.0,94.5 L199.0,91.8 L199.0,89.0 L199.0,86.2 L199.0,83.5 L199.0,80.8 L199.0,78.0 L199.3,75.2 L200.2,72.5 L201.5,69.8 L203.0,67.0 L204.5,64.2 L205.8,61.5 L206.7,58.8 L207.0,56.0 Z"/>`,
+  footL: `<path d="M113,313 L141,313 L144,326 C145,330 141,332 136,332 L114,332 C109,332 106,329 107,325 Z"/>`,
+  footR: `<path d="M187,313 L159,313 L156,326 C155,330 159,332 164,332 L186,332 C191,332 194,329 193,325 Z"/>`
+};
 function buildBodySVG(parts, viewName){
   const gradId = 'bodyGrad-'+viewName;
+  const silhouette = `<g class="body-silhouette" fill="url(#${gradId})">${BODY_SILHOUETTE.armL}${BODY_SILHOUETTE.armR}${BODY_SILHOUETTE.head}${BODY_SILHOUETTE.neck}${BODY_SILHOUETTE.torso}${BODY_SILHOUETTE.legL}${BODY_SILHOUETTE.legR}${BODY_SILHOUETTE.footL}${BODY_SILHOUETTE.footR}</g>`;
   const shapes = parts.map(p=>{
     const rounding = p.shape==='circle' ? 0 : Math.min(p.w,p.h)/2.3;
     const shapeEl = p.shape==='circle'
@@ -4441,6 +4463,7 @@ function buildBodySVG(parts, viewName){
         <stop offset="100%" stop-color="#a30f28"/>
       </linearGradient>
     </defs>
+    ${silhouette}
     <g class="body-group" data-view="${viewName}">${shapes}</g>
   </svg>`;
 }
