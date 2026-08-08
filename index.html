@@ -1711,19 +1711,7 @@ function showLoginCard(id){
     document.getElementById(cid).style.display = cid===id ? 'block' : 'none';
   });
 }
-function showLogin(){
-  document.getElementById('app').style.display='none';
-  document.getElementById('login-screen').style.display='flex';
-  showLoginCard('login-card-login');
-  document.getElementById('login-username').value='';
-  document.getElementById('login-password').value='';
-  document.getElementById('login-error').style.display='none';
-  const fbWarn = document.getElementById('login-error');
-  if(!firebaseReady && firebaseConfig.apiKey!=='TU_API_KEY'){
-    fbWarn.textContent = 'No se pudo conectar con la base de datos compartida (revisá bloqueadores de anuncios o la conexión). Por ahora estás en modo local en este dispositivo.';
-    fbWarn.style.display='block';
-  }
-
+function wireLoginHandlers(){
   document.getElementById('goto-register-player').onclick = ()=>{
     const sel = document.getElementById('reg-player-select');
     const available = STATE.players.filter(p=>!STATE.accounts.some(a=>a.playerId===p.id));
@@ -1799,6 +1787,20 @@ function showLogin(){
     STATE.accounts.push(account); await saveAccountDoc(account);
     await enterSessionForAccount(account);
   };
+}
+function showLogin(){
+  document.getElementById('app').style.display='none';
+  document.getElementById('login-screen').style.display='flex';
+  showLoginCard('login-card-login');
+  document.getElementById('login-username').value='';
+  document.getElementById('login-password').value='';
+  document.getElementById('login-error').style.display='none';
+  const fbWarn = document.getElementById('login-error');
+  if(!firebaseReady && firebaseConfig.apiKey!=='TU_API_KEY'){
+    fbWarn.textContent = 'No se pudo conectar con la base de datos compartida (revisá bloqueadores de anuncios o la conexión). Por ahora estás en modo local en este dispositivo.';
+    fbWarn.style.display='block';
+  }
+  wireLoginHandlers();
 }
 async function enterSessionForAccount(acc){
   SESSION = {
@@ -5077,6 +5079,10 @@ try{
     document.body.classList.toggle('modal-open-lock', modalRootEl.children.length > 0);
   }).observe(modalRootEl, {childList:true});
 }catch(e){ /* MutationObserver no disponible, no bloqueamos scroll de fondo */ }
+// Preparamos los botones de login YA, sin esperar a que termine de cargar Firebase/datos,
+// para que si alguien empieza a escribir su usuario/contraseña apenas abre la app, el botón
+// "Ingresar" ya funcione y no se pierda lo que escribió mientras carga en segundo plano.
+try{ wireLoginHandlers(); }catch(e){ console.error('No se pudieron preparar los botones de login todavía', e); }
 (async function init(){
   try{
     await initFirebase();
@@ -5098,7 +5104,18 @@ try{
       if(firestoreFetchFailed) toast('No se pudo conectar con la base de datos. Algunos datos podrían no estar actualizados.');
     } else {
       if(sessionLooksValid) console.error('Sesión guardada pero la cuenta no se encontró tras reintentar. accountId:', session.accountId);
-      showLogin();
+      // Nota: NO llamamos a showLogin() acá — esa función resetea (borra) los campos de usuario/contraseña,
+      // y si la persona ya estaba escribiendo mientras esto cargaba en segundo plano, le borraría todo.
+      // La pantalla de login ya está visible por defecto y los botones ya se prepararon al principio (wireLoginHandlers).
+      document.getElementById('app').style.display='none';
+      document.getElementById('login-screen').style.display='flex';
+      if(!firebaseReady && firebaseConfig.apiKey!=='TU_API_KEY'){
+        const fbWarn = document.getElementById('login-error');
+        if(fbWarn && fbWarn.style.display!=='block'){
+          fbWarn.textContent = 'No se pudo conectar con la base de datos compartida (revisá bloqueadores de anuncios o la conexión). Por ahora estás en modo local en este dispositivo.';
+          fbWarn.style.display='block';
+        }
+      }
     }
   }catch(e){
     console.error('Error crítico al iniciar la app', e);
