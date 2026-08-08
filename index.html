@@ -909,6 +909,9 @@ async function enablePushNotifications(){
     if(permission !== 'granted'){ toast('No se activaron las notificaciones (permiso no otorgado)'); return false; }
     fbMessaging = firebase.messaging();
     const swReg = await navigator.serviceWorker.ready;
+    // Borramos cualquier token viejo guardado en este navegador antes de pedir uno nuevo.
+    // Sin esto, a veces el navegador devuelve el mismo token de antes (ya inválido) en vez de generar uno realmente nuevo.
+    try{ await fbMessaging.deleteToken(); }catch(e){ /* no había token previo, seguimos igual */ }
     const token = await fbMessaging.getToken({ vapidKey: PUSH_VAPID_KEY, serviceWorkerRegistration: swReg });
     if(!token){ toast('No se pudo generar el token de notificaciones'); return false; }
     await docSet('pushTokens', SESSION.accountId, { accountId: SESSION.accountId, playerId: SESSION.playerId||null, role: SESSION.role, token, updatedAt: new Date().toISOString() });
