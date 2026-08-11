@@ -1013,9 +1013,8 @@ async function collectionGetAll(name){
 }
 async function docSet(name, id, data){
   if(firebaseReady){
-    try{ await withTimeout(fbDb.collection(name).doc(id).set(data), 8000, 'guardado de '+name); return; }
-    catch(e){ console.error('Firestore doc set error', name, e); }
-    return;
+    try{ await withTimeout(fbDb.collection(name).doc(id).set(data), 8000, 'guardado de '+name); return true; }
+    catch(e){ console.error('Firestore doc set error', name, e); return false; }
   }
   try{
     const raw = localStorage.getItem(LS_PREFIX+'coll:'+name);
@@ -1023,7 +1022,8 @@ async function docSet(name, id, data){
     const idx = arr.findIndex(x=>x.id===id);
     if(idx>-1) arr[idx]=data; else arr.push(data);
     localStorage.setItem(LS_PREFIX+'coll:'+name, JSON.stringify(arr));
-  }catch(e){ console.error('storage error', e); }
+    return true;
+  }catch(e){ console.error('storage error', e); return false; }
 }
 async function docDelete(name, id){
   if(firebaseReady){
@@ -1374,7 +1374,7 @@ async function savePlayers(){ await storageSet('players', STATE.players, true); 
 async function saveTestBenchmarks(){ await storageSet('testbenchmarks', STATE.testBenchmarks, true); }
 async function saveTests(){ await storageSet('tests', STATE.tests, true); }
 async function saveInjuries(){ await storageSet('injuries', STATE.injuries, true); }
-async function saveWellnessEntry(entry){ await docSet('wellness', entry.id, entry); }
+async function saveWellnessEntry(entry){ return await docSet('wellness', entry.id, entry); }
 async function deleteWellnessEntry(id){ await docDelete('wellness', id); }
 async function saveAccountDoc(account){ await docSet('accounts', account.id, account); }
 async function deleteAccountDoc(id){ await docDelete('accounts', id); }
@@ -1863,7 +1863,7 @@ function showApp(){
   if(firebaseReady){
     refreshBtn.style.display = 'inline-flex';
     refreshBtn.onclick = async ()=>{ refreshBtn.textContent='⏳'; await refreshSharedData(); refreshBtn.textContent='🔄'; toast('Datos actualizados'); };
-    /* Nota: se sacó el refresco automático en segundo plano — pisaba datos mientras se estaban cargando. Ahora la actualización es siempre manual, con el botón. */
+    if(SESSION.role==='pf') startSharedDataPolling();
   } else {
     refreshBtn.style.display='none';
   }
@@ -1876,9 +1876,16 @@ function showApp(){
 let sharedDataPollInterval = null;
 function startSharedDataPolling(){
   if(sharedDataPollInterval) clearInterval(sharedDataPollInterval);
-  sharedDataPollInterval = setInterval(refreshSharedData, 45000);
+  sharedDataPollInterval = setInterval(async ()=>{
+    await fetchSharedDataIntoState();
+    // Solo volvemos a dibujar la pantalla si estamos en el Panel general, que es de solo lectura
+    // (no tiene ningún formulario donde se pueda estar escribiendo algo en ese momento).
+    // En cualquier otra pantalla, los datos ya quedan actualizados por dentro y se van a ver
+    // frescos apenas la persona navegue a otra sección, sin arriesgarnos a borrarle algo a mitad de escribir.
+    if(SESSION && SESSION.role==='pf' && currentView==='dashboard'){ renderScoreboard(); render(); }
+  }, 45000);
 }
-async function refreshSharedData(){
+async function fetchSharedDataIntoState(){
   if(!firebaseReady) return;
   const [players, tests, injuries, events, exercises, plans] = await Promise.all([
     storageGet('players', true), storageGet('tests', true), storageGet('injuries', true),
@@ -1898,6 +1905,9 @@ async function refreshSharedData(){
   if(exercises) STATE.exercises = exercises;
   if(plans) STATE.plans = plans;
   if(analysis) STATE.analysis = analysis;
+}
+async function refreshSharedData(){
+  await fetchSharedDataIntoState();
   if(SESSION && SESSION.role==='pf'){ renderScoreboard(); render(); }
 }
 function genderGreeting(){
@@ -2085,12 +2095,12 @@ function buildAlerts(){
   const today = todayStr();
   STATE.wellness.filter(w=>w.date===today && w.painAreas && w.painAreas.length).forEach(w=>{
     const p=getPlayer(w.playerId); if(!p) return;
-    const worst = w.painAreas.reduce((max,a)=> a.scale>max.scale?a:max, w.painAreas[0]);
-    const otherCount = w.painAreas.length - 1;
-    alerts.push({
-      title: `${p.name} — marcó molestia hoy`,
-      detail: `${worst.part} (${worst.scale}/10)${worst.note?` — "${worst.note}"`:''}${otherCount>0?` · +${otherCount} zona${otherCount>1?'s':''} más`:''}`,
-      color: worst.scale>=7?'var(--red)':worst.scale>=4?'var(--amber)':'var(--green)'
+    w.painAreas.forEach(a=>{
+      alerts.push({
+        title: `${p.name} — ${a.part}`,
+        detail: `${a.scale}/10${a.note?` — "${a.note}"`:''}`,
+        color: a.scale>=7?'var(--red)':a.scale>=4?'var(--amber)':'var(--green)'
+      });
     });
   });
   const latestByPlayer = {};
@@ -3504,6 +3514,7 @@ function renderAnalysisBody(pid){
   </div>
   <div class="card" style="margin-bottom:16px;">
     <h3>Wellness y carga según fase del ciclo menstrual</h3>
+    <div class="section-sub">Compara los promedios de fatiga, dolor y ánimo que reportó la jugadora, agrupados según la fase del ciclo menstrual que marcó ese día. Los colores solo diferencian las 3 barras entre sí, no indican gravedad. Si ves la categoría "No aplica / No responde", es porque esos días la jugadora marcó esa opción en vez de una fase específica del ciclo (por ejemplo, si no lo quiso indicar).</div>
     ${cycleStats.length? `<div class="chart-box short"><canvas id="chart-cycle-phase"></canvas></div>` : '<div class="empty-state">Sin registros suficientes para este análisis todavía.</div>'}
   </div>
   <div class="card" style="margin-bottom:16px;">
@@ -3548,9 +3559,9 @@ function drawCyclePhaseChart(cycleStats){
   chartRegistry['cycle-phase'] = new Chart(canvas.getContext('2d'), {
     type:'bar',
     data:{ labels: cycleStats.map(s=>s.phase+` (n=${s.n})`), datasets:[
-      {label:'Fatiga media', data:cycleStats.map(s=>Number(s.fatigue.toFixed(2))), backgroundColor:'#e3a857'},
-      {label:'Dolor medio', data:cycleStats.map(s=>Number(s.soreness.toFixed(2))), backgroundColor:'#c8102e'},
-      {label:'Ánimo medio', data:cycleStats.map(s=>Number(s.mood.toFixed(2))), backgroundColor:'#5fa777'} ]},
+      {label:'Fatiga media (0-5)', data:cycleStats.map(s=>Number(s.fatigue.toFixed(2))), backgroundColor:'#5f8ca7'},
+      {label:'Dolor medio (0-5)', data:cycleStats.map(s=>Number(s.soreness.toFixed(2))), backgroundColor:'#8a6fb0'},
+      {label:'Ánimo medio (0-5)', data:cycleStats.map(s=>Number(s.mood.toFixed(2))), backgroundColor:'#5fa777'} ]},
     options: chartOpts() });
 }
 function drawAnalysisChart(records){
@@ -4513,6 +4524,19 @@ function missingWellnessDays(playerId){
   }
   return out;
 }
+function missingPseDays(playerId){
+  const out = [];
+  for(let i=1;i<=6;i++){
+    const d = new Date(); d.setDate(d.getDate()-i);
+    const ds = d.toISOString().slice(0,10);
+    if(!isTrainingOrMatchDay(playerId, ds)) continue;
+    const entry = STATE.wellness.find(w=>w.playerId===playerId && w.date===ds);
+    if(!entry) continue; // ese día ya se cuenta como wellness faltante por completo, no como PSE puntual
+    const postDone = entry.postDone!==undefined ? entry.postDone : true;
+    if(!postDone) out.push(ds);
+  }
+  return out;
+}
 function emojiRow(name, levels, current){
   return `<div class="emoji-row" data-scale="${name}">${levels.map((lv,i)=>`<button type="button" class="emoji-btn ${current===i+1?'active':''}" data-val="${i+1}"><div class="emoji-btn-icon">${lv.e}</div><div class="emoji-btn-label">${lv.l}</div></button>`).join('')}</div>`;
 }
@@ -4531,6 +4555,7 @@ function viewWellness(){
   const entry = STATE.wellness.find(w=>w.playerId===p.id && w.date===targetDate);
   const myCats = playerCategories(p);
   const missingDays = missingWellnessDays(p.id);
+  const missingPse = missingPseDays(p.id);
   // Compatibilidad con registros viejos (sin los flags preDone/postDone): se consideran completos los dos.
   const preDone = entry ? (entry.preDone!==undefined ? entry.preDone : true) : false;
   const postDone = entry ? (entry.postDone!==undefined ? entry.postDone : true) : false;
@@ -4552,6 +4577,14 @@ function viewWellness(){
       ${missingDays.map(d=>`<button type="button" class="btn secondary" data-fill-day="${d}" style="padding:7px 14px; font-size:12.5px;">Completar ${fmtDate(d)}</button>`).join('')}
     </div>
   </div>` : ''}
+  ${missingPse.length && isToday ? `
+  <div class="card" style="margin-bottom:16px; border:1.5px solid var(--amber); background:rgba(227,168,87,0.08);">
+    <h3>🏋️ Te faltan PSE de después del entrenamiento</h3>
+    <div class="section-sub">Completaste el wellness de antes esos días, pero todavía falta cargar cómo te sentiste después de entrenar.</div>
+    <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:10px;">
+      ${missingPse.map(d=>`<button type="button" class="btn secondary" data-fill-day="${d}" style="padding:7px 14px; font-size:12.5px;">Completar PSE del ${fmtDate(d)}</button>`).join('')}
+    </div>
+  </div>` : ''}
   ${!isToday ? `
   <div class="card" style="margin-bottom:16px; border:1.5px solid var(--blue); background:rgba(95,140,167,0.08); display:flex; align-items:center; justify-content:space-between; gap:10px;">
     <div>📅 Estás completando el check-in atrasado del <b>${fmtDate(targetDate)}</b></div>
@@ -4564,7 +4597,8 @@ function viewWellness(){
       + `<button class="btn save-wellness-btn" id="btn-save-wellness-full">💾 Guardar check-in completo del ${fmtDate(targetDate)}</button>`;
   }
   // Hoy no hay entrenamiento ni partido programado en el calendario para esta jugadora
-  if(isToday && !isTrainingOrMatchDay(p.id, targetDate) && !wellnessVoluntaryToday){
+  // (pero si ya arrancó o completó su check-in de hoy, no le volvemos a preguntar — seguimos el flujo normal)
+  if(isToday && !isTrainingOrMatchDay(p.id, targetDate) && !wellnessVoluntaryToday && !preDone){
     return banners + `
     <div class="card" style="margin-bottom:16px;">
       <h3>📅 Hoy no tenés entrenamiento ni partido programado</h3>
@@ -4944,22 +4978,28 @@ function afterRender(){
       const saveDate = wellnessTargetDate || todayStr();
       const existingIdx = STATE.wellness.findIndex(w=>w.playerId===p.id && w.date===saveDate);
       let entryData;
-      if(existingIdx>-1){ entryData = {...STATE.wellness[existingIdx], ...fields}; STATE.wellness[existingIdx]=entryData; }
-      else { entryData = {id:uid(), playerId:p.id, date:saveDate, ...fields}; STATE.wellness.push(entryData); }
-      await saveWellnessEntry(entryData);
+      if(existingIdx>-1){ entryData = {...STATE.wellness[existingIdx], ...fields}; }
+      else { entryData = {id:uid(), playerId:p.id, date:saveDate, ...fields}; }
+      const ok = await saveWellnessEntry(entryData);
+      if(!ok){
+        toast('⚠️ No se pudo guardar — revisá tu conexión a internet e intentá de nuevo. Todavía no se perdió lo que cargaste, solo tocá el botón otra vez.');
+        return null;
+      }
+      if(existingIdx>-1) STATE.wellness[existingIdx]=entryData; else STATE.wellness.push(entryData);
       return entryData;
     }
     const btnPre = document.getElementById('btn-save-wellness-pre');
     if(btnPre) btnPre.addEventListener('click', async ()=>{
       const entryData = await persistWellness({...buildPreFields(), preDone:true});
+      if(!entryData){ return; }
       wellnessForceEdit = null; wellnessVoluntaryToday = false;
       toast('Wellness de antes de la sesión guardado. ¡No te olvides de cargar la PSE después de entrenar!');
       render();
     });
     const btnPost = document.getElementById('btn-save-wellness-post');
     if(btnPost) btnPost.addEventListener('click', async ()=>{
-      if(!rpeTouched.fisico || !rpeTouched.pelota){ toast('Marcá la PSE Físico y la PSE Pelota antes de guardar'); return; }
       const entryData = await persistWellness({...buildPostFields(), postDone:true});
+      if(!entryData){ return; }
       wellnessForceEdit = null; wellnessVoluntaryToday = false;
       const computed = computeAnalysisFromEntry(entryData);
       const rec = await upsertAnalysis(entryData.playerId, entryData.date, computed);
@@ -4967,8 +5007,8 @@ function afterRender(){
     });
     const btnFull = document.getElementById('btn-save-wellness-full');
     if(btnFull) btnFull.addEventListener('click', async ()=>{
-      if(!rpeTouched.fisico || !rpeTouched.pelota){ toast('Marcá la PSE Físico y la PSE Pelota antes de guardar'); return; }
       const entryData = await persistWellness({...buildPreFields(), ...buildPostFields(), preDone:true, postDone:true});
+      if(!entryData){ return; }
       const computed = computeAnalysisFromEntry(entryData);
       const rec = await upsertAnalysis(entryData.playerId, entryData.date, computed);
       wellnessTargetDate = todayStr();
@@ -4979,7 +5019,7 @@ function afterRender(){
       render();
     }));
     const backTodayBtn = document.getElementById('btn-back-today');
-    if(backTodayBtn) backTodayBtn.addEventListener('click', ()=>{ wellnessTargetDate = todayStr(); render(); });
+    if(backTodayBtn) backTodayBtn.addEventListener('click', ()=>{ wellnessTargetDate = todayStr(); wellnessForceEdit = null; render(); });
     const editPreBtn = document.getElementById('btn-edit-pre');
     if(editPreBtn) editPreBtn.addEventListener('click', ()=>{ wellnessForceEdit='pre'; render(); });
     const editPostBtn = document.getElementById('btn-edit-post');
