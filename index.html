@@ -1370,20 +1370,46 @@ function getNormalizationBasis(testType){
   return null;
 }
 function isJumpTest(testType){ return getNormalizationBasis(testType)==='height'; }
-async function savePlayers(){ await storageSet('players', STATE.players, true); }
-async function saveTestBenchmarks(){ await storageSet('testbenchmarks', STATE.testBenchmarks, true); }
-async function saveTests(){ await storageSet('tests', STATE.tests, true); }
-async function saveInjuries(){ await storageSet('injuries', STATE.injuries, true); }
+/* Guardado seguro para colecciones completas (arrays "blob" como jugadoras, testeos, lesiones, etc.):
+   si algo salió mal cargando los datos (problema de red, timeout de Firestore) y el array local
+   quedó vacío o sospechosamente reducido sin que el usuario haya borrado nada a propósito, NO
+   sobrescribimos lo que ya está guardado en la base. Así evitamos perder el plantel entero por
+   un hiccup de conexión. */
+async function safeSaveCollection(key, arr, label){
+  if(firestoreFetchFailed){
+    console.error(`Guardado de "${key}" cancelado: hubo un problema de conexión al cargar los datos. No se sobrescribe nada hasta reconectar.`);
+    toast(`⚠️ No se pudo guardar (${label}) por un problema de conexión — recargá la página antes de seguir editando, para no perder nada.`);
+    return false;
+  }
+  if(Array.isArray(arr) && arr.length===0){
+    // Chequeamos contra lo que ya hay guardado: si en la base HAY datos y acá se quiere guardar vacío,
+    // lo bloqueamos — nadie borra todo un plantel/lista de un golpe en el uso normal de la app.
+    try{
+      const current = await storageGet(key, true);
+      if(current && Array.isArray(current) && current.length>0){
+        console.error(`Guardado de "${key}" bloqueado: se intentó sobrescribir ${current.length} registro(s) existentes con una lista vacía.`);
+        toast(`⚠️ Se bloqueó un guardado que hubiera borrado todo (${label}). Recargá la página e intentá de nuevo.`);
+        return false;
+      }
+    }catch(e){ /* si ni siquiera podemos chequear, mejor no arriesgarnos a guardar vacío */ return false; }
+  }
+  await storageSet(key, arr, true);
+  return true;
+}
+async function savePlayers(){ return await safeSaveCollection('players', STATE.players, 'jugadoras'); }
+async function saveTestBenchmarks(){ return await safeSaveCollection('testbenchmarks', STATE.testBenchmarks, 'benchmarks'); }
+async function saveTests(){ return await safeSaveCollection('tests', STATE.tests, 'testeos'); }
+async function saveInjuries(){ return await safeSaveCollection('injuries', STATE.injuries, 'lesiones'); }
 async function saveWellnessEntry(entry){ return await docSet('wellness', entry.id, entry); }
 async function deleteWellnessEntry(id){ await docDelete('wellness', id); }
 async function saveAccountDoc(account){ await docSet('accounts', account.id, account); }
 async function deleteAccountDoc(id){ await docDelete('accounts', id); }
 async function saveNotificationDoc(n){ await docSet('notifications', n.id, n); }
-async function saveEvents(){ await storageSet('events', STATE.events, true); }
-async function saveExercises(){ await storageSet('exercises', STATE.exercises, true); }
-async function savePlans(){ await storageSet('plans', STATE.plans, true); }
-async function saveMaxLifts(){ await storageSet('maxlifts', STATE.maxLifts, true); }
-async function saveIndividualPlans(){ await storageSet('individualplans', STATE.individualPlans, true); }
+async function saveEvents(){ return await safeSaveCollection('events', STATE.events, 'calendario'); }
+async function saveExercises(){ return await safeSaveCollection('exercises', STATE.exercises, 'ejercicios'); }
+async function savePlans(){ return await safeSaveCollection('plans', STATE.plans, 'planes'); }
+async function saveMaxLifts(){ return await safeSaveCollection('maxlifts', STATE.maxLifts, 'RM'); }
+async function saveIndividualPlans(){ return await safeSaveCollection('individualplans', STATE.individualPlans, 'planes individuales'); }
 const CATEGORY_STYLE = {
   'Dominante de rodilla': {icon:'🦵', color:'#5f8ca7'},
   'Dominante de cadera': {icon:'⚡', color:'#b98c56'},
@@ -2069,8 +2095,8 @@ function viewDashboard(){
   const recentInjuries = [...STATE.injuries].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,4);
   return `
   <div class="grid grid-2">
-    <div class="card"><h3>Alertas del plantel</h3>
-      ${alerts.length? alerts.map(a=>`<div class="injury-row"><div class="sev-dot" style="background:${a.color}"></div><div><b>${a.title}</b><div class="muted" style="font-size:12px;">${a.detail}</div></div></div>`).join('') : `<div class="empty-state">Sin alertas activas. Buen momento para respirar.</div>`}
+    <div class="card"><h3>Molestias reportadas hoy</h3>
+      ${alerts.length? alerts.map(a=>`<div class="injury-row"><div class="sev-dot" style="background:${a.color}"></div><div><b>${a.title}</b><div class="muted" style="font-size:12px;">${a.detail}</div></div></div>`).join('') : `<div class="empty-state">Nadie marcó molestias hoy. Buen momento para respirar.</div>`}
     </div>
     <div class="card"><h3>Lesiones recientes</h3>
       ${recentInjuries.length? recentInjuries.map(i=>{ const p=getPlayer(i.playerId);
@@ -2088,10 +2114,6 @@ function viewDashboard(){
 function sevColor(sev){ return sev==='Grave'?'var(--red)':sev==='Moderada'?'var(--amber)':'var(--green)'; }
 function buildAlerts(){
   const alerts=[];
-  STATE.injuries.filter(i=>i.status!=='De alta').forEach(i=>{
-    const p=getPlayer(i.playerId);
-    alerts.push({title:`${p?p.name:'?'} — lesión activa`, detail:`${i.type} (${i.severity}) ${i.kinesio?'· asiste a kinesiología':'· no asiste a kinesiología'}`, color: sevColor(i.severity)});
-  });
   const today = todayStr();
   STATE.wellness.filter(w=>w.date===today && w.painAreas && w.painAreas.length).forEach(w=>{
     const p=getPlayer(w.playerId); if(!p) return;
@@ -2102,12 +2124,6 @@ function buildAlerts(){
         color: a.scale>=7?'var(--red)':a.scale>=4?'var(--amber)':'var(--green)'
       });
     });
-  });
-  const latestByPlayer = {};
-  STATE.analysis.forEach(a=>{ if(!latestByPlayer[a.playerId] || a.date>latestByPlayer[a.playerId].date) latestByPlayer[a.playerId]=a; });
-  Object.values(latestByPlayer).forEach(a=>{
-    const p=getPlayer(a.playerId); if(!p) return;
-    if(a.label==='Negativo'){ alerts.push({title:`${p.name} — análisis de wellness negativo`, detail:`Score ${a.score}/100 el ${fmtDate(a.date)}: ${a.negatives.slice(0,2).join('; ')}`, color:'var(--red)'}); }
   });
   return alerts;
 }
