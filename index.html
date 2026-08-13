@@ -1969,6 +1969,10 @@ let pendingSlideDir = null;
 function navigate(view, slideDir){
   pendingSlideDir = slideDir || null;
   currentView=view;
+  // Al entrar a Wellness desde el menú (no desde los botones internos de "completar día"),
+  // siempre arrancamos en HOY — así nunca se queda pegado en una fecha vieja de una
+  // navegación anterior, y respeta el orden: primero el wellness de hoy, después su PSE.
+  if(view==='wellness'){ wellnessTargetDate = todayStr(); wellnessForceEdit = null; wellnessVoluntaryToday = false; }
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active', b.dataset.view===view));
   document.querySelectorAll('.bottom-nav-btn[data-view]').forEach(b=>b.classList.toggle('active', b.dataset.view===view));
   const moreBtn = document.getElementById('bottom-nav-more');
@@ -1994,7 +1998,7 @@ function setupSwipeNav(){
   let sx=null, sy=null;
   root.addEventListener('touchstart', e=>{
     const t = e.target;
-    if(t.closest('input[type=range]') || t.closest('svg') || t.closest('.scoreboard') || t.closest('table') || t.closest('.no-swipe')){ sx=null; sy=null; return; }
+    if(t.closest('input[type=range]') || t.closest('svg') || t.closest('canvas') || t.closest('.scoreboard') || t.closest('table') || t.closest('.tabs') || t.closest('.day-tabs') || t.closest('.chart-box') || t.closest('.no-swipe')){ sx=null; sy=null; return; }
     sx = e.touches[0].clientX; sy = e.touches[0].clientY;
   }, {passive:true});
   root.addEventListener('touchend', e=>{
@@ -2002,7 +2006,7 @@ function setupSwipeNav(){
     const dx = e.changedTouches[0].clientX - sx;
     const dy = e.changedTouches[0].clientY - sy;
     sx=null; sy=null;
-    if(Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy)*1.4) return;
+    if(Math.abs(dx) < 110 || Math.abs(dx) < Math.abs(dy)*2.2) return;
     const items = SESSION.role==='pf' ? PF_NAV : JUGADORA_NAV;
     const idx = items.findIndex(i=>i.view===currentView);
     if(idx===-1) return;
@@ -3537,7 +3541,7 @@ function renderAnalysisBody(pid){
     <h3>Molestias y zonas de dolor reportadas</h3>
     <div class="section-sub">Detalle completo de cada zona marcada por la jugadora en su wellness diario, con su nota.</div>
     ${(()=>{
-      const withPain = myWellness.filter(w=>w.painAreas && w.painAreas.length).slice().reverse();
+      const withPain = myWellness.filter(w=>(w.painAreas && w.painAreas.length) || w.injured).slice().reverse();
       if(!withPain.length) return '<div class="empty-state">Sin molestias reportadas en el historial.</div>';
       return withPain.map(w=>`
         <div class="injury-row" style="align-items:flex-start; flex-direction:column; gap:8px;">
@@ -3545,7 +3549,8 @@ function renderAnalysisBody(pid){
             <b>${fmtDate(w.date)}</b>
             ${w.injured? '<span class="badge danger">Reportó lesión activa ese día</span>':''}
           </div>
-          ${w.painAreas.map(a=>{
+          ${w.injured && w.injuryDesc? `<div class="muted" style="width:100%; font-style:italic;">"${w.injuryDesc}"</div>`:''}
+          ${(w.painAreas||[]).map(a=>{
             const cls = a.scale>=7?'danger':a.scale>=4?'warn':'ok';
             return `<div style="width:100%; background:var(--bg-raise); border-radius:10px; padding:10px 14px; border-left:3px solid ${a.scale>=7?'var(--red)':a.scale>=4?'var(--amber)':'var(--green)'};">
               <div style="display:flex; align-items:center; justify-content:space-between;">
@@ -4524,6 +4529,12 @@ let rpeTouched = {fisico:false, pelota:false};
 let wellnessTargetDate = null;
 let wellnessForceEdit = null;
 let wellnessVoluntaryToday = false;
+function getLastInjuryReport(playerId, beforeDate){
+  const prior = STATE.wellness
+    .filter(w=>w.playerId===playerId && w.date<beforeDate && w.injured && w.injuryDesc)
+    .sort((a,b)=>b.date.localeCompare(a.date));
+  return prior.length ? prior[0] : null;
+}
 function isTrainingOrMatchDay(playerId, dateStr){
   const p = getPlayer(playerId);
   if(!p) return false;
@@ -4579,8 +4590,8 @@ function viewWellness(){
     sleepHours:Number(entry.sleepHours), fatigue:Number(entry.fatigue), soreness:Number(entry.soreness), mood:Number(entry.mood),
     ball:Number(entry.ball||0), fitness:Number(entry.fitness||0), match:Number(entry.match||0),
     rpeFisico: entry.rpeFisico!==undefined ? Number(entry.rpeFisico) : 5, rpePelota: entry.rpePelota!==undefined ? Number(entry.rpePelota) : 5,
-    cyclePhase: entry.cyclePhase, injured: entry.injured, kinesio: entry.kinesio, dayCategory: entry.dayCategory || myCats[0] || ''
-  } : {sleepHours:7, fatigue:3, soreness:2, mood:4, ball:0, fitness:0, match:0, rpeFisico:5, rpePelota:5, cyclePhase:CYCLE_PHASES[4], injured:false, kinesio:false, dayCategory: myCats[0] || ''};
+    cyclePhase: entry.cyclePhase, injured: entry.injured, kinesio: entry.kinesio, injuryDesc: entry.injuryDesc||'', dayCategory: entry.dayCategory || myCats[0] || ''
+  } : {sleepHours:7, fatigue:3, soreness:2, mood:4, ball:0, fitness:0, match:0, rpeFisico:5, rpePelota:5, cyclePhase:CYCLE_PHASES[4], injured:false, kinesio:false, injuryDesc:'', dayCategory: myCats[0] || ''};
   rpeTouched = { fisico: !!(entry && entry.rpeFisico!==undefined), pelota: !!(entry && entry.rpePelota!==undefined) };
   selectedPainAreas = entry ? JSON.parse(JSON.stringify(entry.painAreas||[])) : [];
 
@@ -4609,7 +4620,7 @@ function viewWellness(){
 
   // Día atrasado: se completa todo junto (pre + post), como antes, para simplificar la puesta al día.
   if(!isToday){
-    return banners + wellnessPreFormHTML(p, targetDate, isToday) + wellnessPostFormHTML(p, targetDate, isToday, myCats)
+    return banners + wellnessPreFormHTML(p, targetDate, isToday, entry) + wellnessPostFormHTML(p, targetDate, isToday, myCats)
       + `<button class="btn save-wellness-btn" id="btn-save-wellness-full">💾 Guardar check-in completo del ${fmtDate(targetDate)}</button>`;
   }
   // Hoy no hay entrenamiento ni partido programado en el calendario para esta jugadora
@@ -4624,7 +4635,7 @@ function viewWellness(){
   }
   // Hoy, pero todavía no completó el wellness de antes de la sesión (o lo está editando a propósito)
   if(!preDone || wellnessForceEdit==='pre'){
-    return banners + wellnessPreFormHTML(p, targetDate, isToday)
+    return banners + wellnessPreFormHTML(p, targetDate, isToday, entry)
       + `<button class="btn save-wellness-btn" id="btn-save-wellness-pre">💾 Guardar check-in de antes de la sesión</button>`;
   }
   // Ya completó el de antes, falta el de después (PSE + carga) — o lo está editando a propósito
@@ -4648,7 +4659,8 @@ function viewWellness(){
     <button class="btn secondary" id="btn-edit-post">✏️ Editar PSE de después</button>
   </div>`;
 }
-function wellnessPreFormHTML(p, targetDate, isToday){
+function wellnessPreFormHTML(p, targetDate, isToday, entry){
+  const lastInjury = !entry ? getLastInjuryReport(p.id, targetDate) : null;
   return `
   <div class="card" style="margin-bottom:16px;">
     <h3>¿Cómo llegaste ${isToday?'hoy':`el ${fmtDate(targetDate)}`}, ${p.name.split(' ')[0]}? — ${fmtDate(targetDate)}</h3>
@@ -4666,10 +4678,21 @@ function wellnessPreFormHTML(p, targetDate, isToday){
         </button>`).join('')}
       </div>
     </div>
+    ${lastInjury ? `
+    <div class="field-wrap" id="same-injury-prompt" style="background:rgba(227,168,87,0.1); border:1.5px solid var(--amber); border-radius:12px; padding:12px 14px;">
+      <label class="field">La última vez (${fmtDate(lastInjury.date)}) marcaste: <i>"${lastInjury.injuryDesc}"</i></label>
+      <div class="section-sub" style="margin-bottom:8px;">¿Seguís con la misma molestia?</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button type="button" class="btn secondary sm" id="same-injury-yes" style="padding:7px 14px; font-size:12.5px;">Sí, sigo igual</button>
+        <button type="button" class="btn secondary sm" id="same-injury-no" style="padding:7px 14px; font-size:12.5px;">Ya no tengo esa molestia</button>
+        <button type="button" class="btn secondary sm" id="same-injury-other" style="padding:7px 14px; font-size:12.5px;">Tengo otra distinta</button>
+      </div>
+    </div>` : ''}
     <div class="row">
       <div class="field-wrap"><label class="field">¿Lesionada actualmente?</label><select id="w-injured"><option value="no" ${!wellnessDraft.injured?'selected':''}>No</option><option value="si" ${wellnessDraft.injured?'selected':''}>Sí</option></select></div>
       <div class="field-wrap" id="kine-wrap" style="display:${wellnessDraft.injured?'block':'none'};"><label class="field">¿Asiste a kinesiología?</label><select id="w-kine"><option value="no" ${!wellnessDraft.kinesio?'selected':''}>No</option><option value="si" ${wellnessDraft.kinesio?'selected':''}>Sí</option></select></div>
     </div>
+    <div class="field-wrap" id="injury-desc-wrap" style="display:${wellnessDraft.injured?'block':'none'};"><label class="field">¿Qué lesión tenés?</label><input type="text" id="w-injury-desc" placeholder="Ej: molestia en el gemelo derecho" value="${wellnessDraft.injuryDesc||''}"></div>
   </div>
   <div class="card" style="margin-bottom:16px;">
     <h3>¿Dónde sentís molestias ${isToday?'hoy':'ese día'}?</h3>
@@ -4942,7 +4965,30 @@ function afterRender(){
     if(injuredSel) injuredSel.addEventListener('change', e=>{
       wellnessDraft.injured = e.target.value==='si';
       document.getElementById('kine-wrap').style.display = wellnessDraft.injured ? 'block' : 'none';
-      if(!wellnessDraft.injured){ document.getElementById('w-kine').value='no'; wellnessDraft.kinesio=false; }
+      document.getElementById('injury-desc-wrap').style.display = wellnessDraft.injured ? 'block' : 'none';
+      if(!wellnessDraft.injured){ document.getElementById('w-kine').value='no'; wellnessDraft.kinesio=false; document.getElementById('w-injury-desc').value=''; }
+    });
+    const samePrompt = document.getElementById('same-injury-prompt');
+    function fillInjuryFields(injured, desc){
+      wellnessDraft.injured = injured;
+      document.getElementById('w-injured').value = injured ? 'si' : 'no';
+      document.getElementById('kine-wrap').style.display = injured ? 'block' : 'none';
+      document.getElementById('injury-desc-wrap').style.display = injured ? 'block' : 'none';
+      document.getElementById('w-injury-desc').value = desc;
+      wellnessDraft.injuryDesc = desc;
+      if(samePrompt) samePrompt.style.display = 'none';
+    }
+    const sameYesBtn = document.getElementById('same-injury-yes');
+    if(sameYesBtn) sameYesBtn.addEventListener('click', ()=>{
+      const desc = document.getElementById('same-injury-prompt').querySelector('i').textContent.replace(/^"|"$/g,'');
+      fillInjuryFields(true, desc);
+    });
+    const sameNoBtn = document.getElementById('same-injury-no');
+    if(sameNoBtn) sameNoBtn.addEventListener('click', ()=>{ fillInjuryFields(false, ''); });
+    const sameOtherBtn = document.getElementById('same-injury-other');
+    if(sameOtherBtn) sameOtherBtn.addEventListener('click', ()=>{
+      fillInjuryFields(true, '');
+      document.getElementById('w-injury-desc').focus();
     });
     ['ball','fitness','match'].forEach(k=>{
       const input=document.getElementById('w-'+k);
@@ -4972,10 +5018,12 @@ function afterRender(){
     });
     if(rpeFisicoInput || rpePelotaInput) updateLoadBadge();
     function buildPreFields(){
+      const isInjured = document.getElementById('w-injured').value==='si';
       return {
         sleepHours: wellnessDraft.sleepHours, fatigue: wellnessDraft.fatigue, soreness: wellnessDraft.soreness, mood: wellnessDraft.mood,
         cyclePhase: wellnessDraft.cyclePhase,
-        injured: document.getElementById('w-injured').value==='si', kinesio: document.getElementById('w-injured').value==='si' ? (document.getElementById('w-kine').value==='si') : false,
+        injured: isInjured, kinesio: isInjured ? (document.getElementById('w-kine').value==='si') : false,
+        injuryDesc: isInjured ? document.getElementById('w-injury-desc').value.trim() : '',
         painAreas: selectedPainAreas
       };
     }
