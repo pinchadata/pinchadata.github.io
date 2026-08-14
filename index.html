@@ -976,6 +976,7 @@ async function storageGet(key, shared){
   if(shared && firebaseReady){
     try{
       const doc = await withTimeout(fbDb.collection('app_data').doc(key).get(), 8000, 'lectura de '+key);
+      firestoreFetchFailed = false; // se pudo leer bien: la conexión está OK, apagamos la alarma
       return doc.exists ? JSON.parse(doc.data().value) : null;
     }catch(e){
       console.error('Firestore get error', e);
@@ -987,14 +988,14 @@ async function storageGet(key, shared){
 }
 async function storageSet(key, value, shared){
   if(shared && firebaseReady){
-    try{ await withTimeout(fbDb.collection('app_data').doc(key).set({value: JSON.stringify(value)}), 8000, 'guardado de '+key); return; }
-    catch(e){ console.error('Firestore set error', e); }
+    try{ await withTimeout(fbDb.collection('app_data').doc(key).set({value: JSON.stringify(value)}), 8000, 'guardado de '+key); firestoreFetchFailed = false; return true; }
+    catch(e){ console.error('Firestore set error', e); firestoreFetchFailed = true; return false; }
   }
-  try{ localStorage.setItem(LS_PREFIX+key, JSON.stringify(value)); }catch(e){ console.error('storage error', e); }
+  try{ localStorage.setItem(LS_PREFIX+key, JSON.stringify(value)); return true; }catch(e){ console.error('storage error', e); return false; }
 }
 async function storageDelete(key, shared){
   if(shared && firebaseReady){
-    try{ await withTimeout(fbDb.collection('app_data').doc(key).delete(), 8000, 'borrado de '+key); return; }catch(e){ /* ignore */ }
+    try{ await withTimeout(fbDb.collection('app_data').doc(key).delete(), 8000, 'borrado de '+key); firestoreFetchFailed = false; return; }catch(e){ /* ignore */ }
   }
   try{ localStorage.removeItem(LS_PREFIX+key); }catch(e){ /* ignore */ }
 }
@@ -1006,6 +1007,7 @@ async function collectionGetAll(name){
   if(firebaseReady){
     try{
       const snap = await withTimeout(fbDb.collection(name).get(), 15000, 'lectura de colección '+name);
+      firestoreFetchFailed = false; // se pudo leer bien: apagamos la alarma
       return snap.docs.map(d=>d.data());
     }catch(e){ console.error('Firestore collection get error', name, e); firestoreFetchFailed = true; return null; }
   }
@@ -1193,6 +1195,8 @@ function playerWellnessAverages(pid, days=7){
   const all = STATE.wellness.filter(w=>w.playerId===pid).sort((a,b)=>a.date.localeCompare(b.date));
   const last = all.length ? all[all.length-1] : null;
   if(!recent.length) return { n:0, sleep:null, fatigue:null, soreness:null, mood:null, load:null, rpeFisico:null, rpePelota:null, lastDate: last?last.date:null, injured: last?!!last.injured:false };
+  const withRpeFisico = recent.filter(w=>w.rpeFisico!==undefined);
+  const withRpePelota = recent.filter(w=>w.rpePelota!==undefined);
   return {
     n: recent.length,
     sleep: avg(recent.map(w=>Number(w.sleepHours))),
@@ -1200,8 +1204,8 @@ function playerWellnessAverages(pid, days=7){
     soreness: avg(recent.map(w=>Number(w.soreness))),
     mood: avg(recent.map(w=>Number(w.mood))),
     load: avg(recent.map(w=>sessionLoad(w))),
-    rpeFisico: avg(recent.filter(w=>w.rpeFisico!==undefined).map(w=>Number(w.rpeFisico))),
-    rpePelota: avg(recent.filter(w=>w.rpePelota!==undefined).map(w=>Number(w.rpePelota))),
+    rpeFisico: withRpeFisico.length ? avg(withRpeFisico.map(w=>Number(w.rpeFisico))) : null,
+    rpePelota: withRpePelota.length ? avg(withRpePelota.map(w=>Number(w.rpePelota))) : null,
     lastDate: last.date,
     injured: !!last.injured
   };
