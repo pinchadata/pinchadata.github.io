@@ -886,6 +886,9 @@ function avg(arr){ const a=arr.filter(n=>!isNaN(n)); if(!a.length) return 0; ret
 
 /* =============================== STORAGE =============================== */
 /* =============================== FIREBASE CONFIG =============================== */
+/* Se actualiza cada vez que se genera una versión nueva del archivo — sirve para confirmar
+   rápido, desde Ajustes, si lo que está publicado en GitHub es la última versión o no. */
+const APP_VERSION = "2026-08-14.1";
 const firebaseConfig = {
   apiKey: "AIzaSyBxcxTN2PMGZEdhj1tJcyptwRX86yg2E1w",
   authDomain: "pincha-data.firebaseapp.com",
@@ -971,16 +974,21 @@ async function initFirebase(){
 }
 
 const LS_PREFIX = 'pincha-data:';
-let firestoreFetchFailed = false;
+/* En vez de una sola bandera global (que un fetch en paralelo que sale bien puede "tapar" el
+   fallo real de otro fetch simultáneo, exactamente el bug que causó la segunda pérdida de datos),
+   llevamos un registro de qué claves específicas fallaron. Cada guardado solo se bloquea si
+   ESA clave puntual tuvo un problema, no si cualquier otra cosa no vinculada falló en simultáneo. */
+let failedStorageKeys = new Set();
+function anyStorageFailed(){ return failedStorageKeys.size > 0; }
 async function storageGet(key, shared){
   if(shared && firebaseReady){
     try{
       const doc = await withTimeout(fbDb.collection('app_data').doc(key).get(), 8000, 'lectura de '+key);
-      firestoreFetchFailed = false; // se pudo leer bien: la conexión está OK, apagamos la alarma
+      failedStorageKeys.delete(key); // se pudo leer bien esta clave puntual: la sacamos de la lista de fallos
       return doc.exists ? JSON.parse(doc.data().value) : null;
     }catch(e){
       console.error('Firestore get error', e);
-      firestoreFetchFailed = true;
+      failedStorageKeys.add(key);
       return null;
     }
   }
@@ -988,14 +996,14 @@ async function storageGet(key, shared){
 }
 async function storageSet(key, value, shared){
   if(shared && firebaseReady){
-    try{ await withTimeout(fbDb.collection('app_data').doc(key).set({value: JSON.stringify(value)}), 8000, 'guardado de '+key); firestoreFetchFailed = false; return true; }
-    catch(e){ console.error('Firestore set error', e); firestoreFetchFailed = true; return false; }
+    try{ await withTimeout(fbDb.collection('app_data').doc(key).set({value: JSON.stringify(value)}), 8000, 'guardado de '+key); failedStorageKeys.delete(key); return true; }
+    catch(e){ console.error('Firestore set error', e); failedStorageKeys.add(key); return false; }
   }
   try{ localStorage.setItem(LS_PREFIX+key, JSON.stringify(value)); return true; }catch(e){ console.error('storage error', e); return false; }
 }
 async function storageDelete(key, shared){
   if(shared && firebaseReady){
-    try{ await withTimeout(fbDb.collection('app_data').doc(key).delete(), 8000, 'borrado de '+key); firestoreFetchFailed = false; return; }catch(e){ /* ignore */ }
+    try{ await withTimeout(fbDb.collection('app_data').doc(key).delete(), 8000, 'borrado de '+key); failedStorageKeys.delete(key); return; }catch(e){ /* ignore */ }
   }
   try{ localStorage.removeItem(LS_PREFIX+key); }catch(e){ /* ignore */ }
 }
@@ -1007,9 +1015,9 @@ async function collectionGetAll(name){
   if(firebaseReady){
     try{
       const snap = await withTimeout(fbDb.collection(name).get(), 15000, 'lectura de colección '+name);
-      firestoreFetchFailed = false; // se pudo leer bien: apagamos la alarma
+      failedStorageKeys.delete(name);
       return snap.docs.map(d=>d.data());
-    }catch(e){ console.error('Firestore collection get error', name, e); firestoreFetchFailed = true; return null; }
+    }catch(e){ console.error('Firestore collection get error', name, e); failedStorageKeys.add(name); return null; }
   }
   try{ const raw = localStorage.getItem(LS_PREFIX+'coll:'+name); return raw ? JSON.parse(raw) : null; }catch(e){ return null; }
 }
@@ -1066,7 +1074,7 @@ async function loadAll(){
   let playersChanged = migratePositions();
   if(migrateCategories()) playersChanged = true;
   if(migratePositionsMulti()) playersChanged = true;
-  if(playersChanged && !firestoreFetchFailed) await storageSet('players', STATE.players, true);
+  if(playersChanged) await safeSaveCollection('players', STATE.players, 'jugadoras');
   STATE.tests = tests || seedTests(STATE.players);
   STATE.injuries = injuries || seedInjuries(STATE.players);
   STATE.wellness = wellness || seedWellness(STATE.players);
@@ -1078,29 +1086,30 @@ async function loadAll(){
   STATE.maxLifts = maxLifts || [];
   STATE.individualPlans = individualPlans || [];
   STATE.testBenchmarks = testBenchmarks || [];
-  if(!firestoreFetchFailed){
-    if(!players) await storageSet('players', STATE.players, true);
-    if(tests){ if(migrateTests()) await storageSet('tests', STATE.tests, true); } else { await storageSet('tests', STATE.tests, true); }
-    if(injuries){ if(migrateInjuries()) await storageSet('injuries', STATE.injuries, true); } else { await storageSet('injuries', STATE.injuries, true); }
-    if(!events) await storageSet('events', STATE.events, true);
-    if(!exercises) await storageSet('exercises', STATE.exercises, true);
-    else if(await topUpExercises()) await storageSet('exercises', STATE.exercises, true);
+  // Nota: todos estos guardados pasan por safeSaveCollection, que antes de escribir compara
+  // contra lo que YA hay en la base — así, aunque este documento puntual nunca haya fallado al
+  // leerse (y por eso no esté marcado como "clave fallida"), si de todos modos representa perder
+  // datos reales existentes, igual se bloquea. Es la misma traba que protege cualquier otro guardado
+  // de la app, ya no hay ningún camino que la evite.
+  if(!players) await safeSaveCollection('players', STATE.players, 'jugadoras');
+  if(tests){ if(migrateTests()) await safeSaveCollection('tests', STATE.tests, 'testeos'); } else { await safeSaveCollection('tests', STATE.tests, 'testeos'); }
+  if(injuries){ if(migrateInjuries()) await safeSaveCollection('injuries', STATE.injuries, 'lesiones'); } else { await safeSaveCollection('injuries', STATE.injuries, 'lesiones'); }
+  if(!events) await safeSaveCollection('events', STATE.events, 'calendario');
+  if(!exercises) await safeSaveCollection('exercises', STATE.exercises, 'ejercicios');
+  else if(await topUpExercises()) await safeSaveCollection('exercises', STATE.exercises, 'ejercicios');
+  if(exercises){
     const descsCleared = await storageGet('descriptionscleared', true);
     if(!descsCleared){
       STATE.exercises.forEach(ex=>{ ex.description=''; });
-      await storageSet('exercises', STATE.exercises, true);
+      await safeSaveCollection('exercises', STATE.exercises, 'ejercicios');
       await storageSet('descriptionscleared', true, true);
     }
-    if(applyExerciseVideos()) await storageSet('exercises', STATE.exercises, true);
-    if(!plans) await storageSet('plans', STATE.plans, true);
-    if(!maxLifts) await storageSet('maxlifts', STATE.maxLifts, true);
-    if(!individualPlans) await storageSet('individualplans', STATE.individualPlans, true);
-    if(!testBenchmarks) await storageSet('testbenchmarks', STATE.testBenchmarks, true);
-  } else {
-    if(tests) migrateTests();
-    if(injuries) migrateInjuries();
-    if(exercises) topUpExercises();
+    if(applyExerciseVideos()) await safeSaveCollection('exercises', STATE.exercises, 'ejercicios');
   }
+  if(!plans) await safeSaveCollection('plans', STATE.plans, 'planes');
+  if(!maxLifts) await safeSaveCollection('maxlifts', STATE.maxLifts, 'RM');
+  if(!individualPlans) await safeSaveCollection('individualplans', STATE.individualPlans, 'planes individuales');
+  if(!testBenchmarks) await safeSaveCollection('testbenchmarks', STATE.testBenchmarks, 'benchmarks');
   await ensureAnalysisSeed();
 }
 function topUpExercises(){
@@ -1380,25 +1389,27 @@ function isJumpTest(testType){ return getNormalizationBasis(testType)==='height'
    sobrescribimos lo que ya está guardado en la base. Así evitamos perder el plantel entero por
    un hiccup de conexión. */
 async function safeSaveCollection(key, arr, label){
-  if(firestoreFetchFailed){
-    console.error(`Guardado de "${key}" cancelado: hubo un problema de conexión al cargar los datos. No se sobrescribe nada hasta reconectar.`);
+  if(failedStorageKeys.has(key)){
+    console.error(`Guardado de "${key}" cancelado: la última lectura/escritura de ESTA colección puntual falló. No se sobrescribe nada hasta reconectar.`);
     toast(`⚠️ No se pudo guardar (${label}) por un problema de conexión — recargá la página antes de seguir editando, para no perder nada.`);
     return false;
   }
-  if(Array.isArray(arr) && arr.length===0){
-    // Chequeamos contra lo que ya hay guardado: si en la base HAY datos y acá se quiere guardar vacío,
-    // lo bloqueamos — nadie borra todo un plantel/lista de un golpe en el uso normal de la app.
+  if(Array.isArray(arr)){
+    // Chequeamos contra lo que ya hay guardado ANTES de pisarlo: si la base tiene bastante más de
+    // lo que estamos por guardar (vacío del todo, o una caída grande y repentina), lo bloqueamos.
+    // En el uso normal de la app nadie borra de golpe todo un plantel ni la mayoría de una lista.
     try{
       const current = await storageGet(key, true);
-      if(current && Array.isArray(current) && current.length>0){
-        console.error(`Guardado de "${key}" bloqueado: se intentó sobrescribir ${current.length} registro(s) existentes con una lista vacía.`);
-        toast(`⚠️ Se bloqueó un guardado que hubiera borrado todo (${label}). Recargá la página e intentá de nuevo.`);
+      const currentLen = (current && Array.isArray(current)) ? current.length : 0;
+      const drasticDrop = currentLen>=4 && arr.length < currentLen*0.5;
+      if(currentLen>0 && (arr.length===0 || drasticDrop)){
+        console.error(`Guardado de "${key}" bloqueado: se intentó pasar de ${currentLen} a ${arr.length} registro(s).`);
+        toast(`⚠️ Se bloqueó un guardado que hubiera borrado gran parte de "${label}" (de ${currentLen} a ${arr.length}). Recargá la página e intentá de nuevo. Si el cambio era intencional (por ejemplo borraste varias jugadoras a propósito), avisale a soporte para hacerlo con cuidado.`);
         return false;
       }
-    }catch(e){ /* si ni siquiera podemos chequear, mejor no arriesgarnos a guardar vacío */ return false; }
+    }catch(e){ /* si ni siquiera podemos chequear, mejor no arriesgarnos */ return false; }
   }
-  await storageSet(key, arr, true);
-  return true;
+  return await storageSet(key, arr, true);
 }
 async function savePlayers(){ return await safeSaveCollection('players', STATE.players, 'jugadoras'); }
 async function saveTestBenchmarks(){ return await safeSaveCollection('testbenchmarks', STATE.testBenchmarks, 'benchmarks'); }
@@ -1680,6 +1691,58 @@ async function upsertAnalysis(playerId, date, computed){
   await docSet('analysis', rec.id, rec);
   return rec;
 }
+/* ===== Copias de seguridad automáticas =====
+   Una vez por día (la primera vez que el PF abre la app ese día), se guarda una foto completa
+   de todas las colecciones "blob" en una colección aparte (backups/AAAA-MM-DD). Como cada día
+   tiene su propio documento, aunque el de HOY se corrompa por algún motivo, las copias de días
+   anteriores quedan intactas — no hay forma de que un guardado malo pise una copia vieja. */
+async function autoBackupIfNeeded(){
+  if(!firebaseReady || SESSION.role!=='pf') return;
+  const today = todayStr();
+  try{
+    const metaDoc = await fbDb.collection('backups').doc('_meta').get();
+    const lastBackupDate = metaDoc.exists ? metaDoc.data().lastDate : null;
+    if(lastBackupDate===today) return; // ya se hizo la copia de hoy
+    const snapshot = {
+      date: today, timestamp: new Date().toISOString(),
+      players: STATE.players, tests: STATE.tests, injuries: STATE.injuries,
+      maxLifts: STATE.maxLifts, individualPlans: STATE.individualPlans,
+      exercises: STATE.exercises, events: STATE.events, plans: STATE.plans,
+      testBenchmarks: STATE.testBenchmarks,
+      counts: { players: STATE.players.length, tests: STATE.tests.length, injuries: STATE.injuries.length,
+        exercises: STATE.exercises.length, events: STATE.events.length, plans: STATE.plans.length,
+        maxLifts: STATE.maxLifts.length, individualPlans: STATE.individualPlans.length }
+    };
+    await fbDb.collection('backups').doc(today).set(snapshot);
+    await fbDb.collection('backups').doc('_meta').set({lastDate: today});
+    console.log('Backup automático del '+today+' guardado.');
+  }catch(e){ console.error('No se pudo hacer el backup automático', e); }
+}
+async function listRecentBackups(){
+  try{
+    const snap = await fbDb.collection('backups').orderBy('date','desc').limit(14).get();
+    return snap.docs.filter(d=>d.id!=='_meta').map(d=>d.data());
+  }catch(e){ console.error('No se pudo listar backups', e); return []; }
+}
+async function restoreFromBackup(date){
+  try{
+    const doc = await fbDb.collection('backups').doc(date).get();
+    if(!doc.exists){ toast('No se encontró esa copia de seguridad'); return false; }
+    const b = doc.data();
+    await storageSet('players', b.players||[], true);
+    await storageSet('tests', b.tests||[], true);
+    await storageSet('injuries', b.injuries||[], true);
+    await storageSet('maxlifts', b.maxLifts||[], true);
+    await storageSet('individualplans', b.individualPlans||[], true);
+    await storageSet('exercises', b.exercises||[], true);
+    await storageSet('events', b.events||[], true);
+    await storageSet('plans', b.plans||[], true);
+    await storageSet('testbenchmarks', b.testBenchmarks||[], true);
+    toast('Copia del '+date+' restaurada. Recargando...');
+    setTimeout(()=>location.reload(), 1500);
+    return true;
+  }catch(e){ console.error('Error restaurando backup', e); toast('No se pudo restaurar esa copia'); return false; }
+}
 async function ensureAnalysisSeed(){
   const records = await loadCollectionWithMigration('analysis', 'analysis');
   if(records && records.length){ STATE.analysis = records; return; }
@@ -1689,7 +1752,7 @@ async function ensureAnalysisSeed(){
     const c=computeAnalysisFromEntry(w);
     const rec = {id:uid(), playerId:w.playerId, date:w.date, ...c};
     STATE.analysis.push(rec);
-    if(!firestoreFetchFailed) await docSet('analysis', rec.id, rec);
+    if(!anyStorageFailed()) await docSet('analysis', rec.id, rec);
   }
 }
 
@@ -1768,11 +1831,11 @@ function wireLoginHandlers(){
     const username = document.getElementById('login-username').value.trim().toLowerCase();
     const password = document.getElementById('login-password').value;
     if(!username || !password){ errBox.textContent='Completá usuario y contraseña.'; errBox.style.display='block'; return; }
-    if(firestoreFetchFailed){
+    if(anyStorageFailed()){
       errBox.textContent='No se pudo conectar con la base de datos. Revisá tu conexión y tocá "Ingresar" de nuevo.'; errBox.style.display='block';
-      firestoreFetchFailed = false;
+      failedStorageKeys.clear();
       await loadAll();
-      if(firestoreFetchFailed){ return; }
+      if(anyStorageFailed()){ return; }
     }
     const acc = STATE.accounts.find(a=>a.username===username);
     if(!acc){ errBox.textContent='No existe ese usuario.'; errBox.style.display='block'; return; }
@@ -1897,6 +1960,7 @@ function showApp(){
   } else {
     refreshBtn.style.display='none';
   }
+  if(SESSION.role==='pf') autoBackupIfNeeded();
   applyTheme();
   setupSwipeNav();
   maybeShowInstallBanner();
@@ -4857,6 +4921,14 @@ function viewSettings(){
     <h3>Backup completo</h3>
     <div class="section-sub">Descargá una copia de absolutamente todos los datos de la app (plantel, wellness, testeos, lesiones, RM, planificaciones, calendario, cuentas) en un solo Excel, por las dudas. Recomendado hacerlo cada tanto, sobre todo antes de cambios grandes.</div>
     <button class="btn secondary" id="btn-full-backup" style="margin-top:10px;">💾 Descargar backup completo</button>
+  </div>
+  <div class="card" style="max-width:640px; margin-top:16px;">
+    <h3>🛡️ Copias de seguridad automáticas</h3>
+    <div class="section-sub">La app guarda sola una copia completa por día (plantel, testeos, lesiones, RM, calendario, planificación) — no depende de que te acuerdes de nada. Si algún día algo se pierde, podés volver acá y restaurar el último día bueno con un toque.</div>
+    <div id="backups-list-container" style="margin-top:12px;"><div class="empty-state">Cargando copias de seguridad...</div></div>
+  </div>
+  <div class="card" style="max-width:640px; margin-top:16px;">
+    <div class="section-sub" style="text-align:center;">Pincha Data — v${APP_VERSION}</div>
   </div>` : ''}`;
 }
 
@@ -5130,6 +5202,29 @@ function afterRender(){
     if(backupBtn) backupBtn.addEventListener('click', downloadFullBackup);
     const enablePushBtn = document.getElementById('btn-enable-push');
     if(enablePushBtn) enablePushBtn.addEventListener('click', enablePushNotifications);
+    const backupsContainer = document.getElementById('backups-list-container');
+    if(backupsContainer && SESSION.role==='pf'){
+      listRecentBackups().then(backups=>{
+        if(!backups.length){
+          backupsContainer.innerHTML = '<div class="empty-state">Todavía no hay copias automáticas guardadas — se genera la primera la próxima vez que entres a la app.</div>';
+          return;
+        }
+        backupsContainer.innerHTML = backups.map(b=>`
+          <div class="injury-row" style="align-items:center;">
+            <div style="flex:1;">
+              <b>${fmtDate(b.date)}</b>
+              <div class="muted" style="font-size:12px;">${b.counts?.players ?? '?'} jugadoras · ${b.counts?.tests ?? '?'} testeos · ${b.counts?.injuries ?? '?'} lesiones · ${b.counts?.exercises ?? '?'} ejercicios</div>
+            </div>
+            <button type="button" class="btn secondary sm" data-restore-backup="${b.date}" style="padding:7px 14px; font-size:12.5px;">Restaurar esta copia</button>
+          </div>`).join('');
+        document.querySelectorAll('[data-restore-backup]').forEach(btn=>btn.addEventListener('click', async ()=>{
+          const date = btn.dataset.restoreBackup;
+          if(!confirm(`¿Restaurar la copia del ${fmtDate(date)}?\n\nEsto va a REEMPLAZAR los datos actuales de jugadoras, testeos, lesiones, RM, calendario y planificación por los de esa fecha. Los cambios hechos después de esa copia se van a perder.\n\n¿Confirmás?`)) return;
+          btn.textContent = 'Restaurando...'; btn.disabled = true;
+          await restoreFromBackup(date);
+        }));
+      });
+    }
     document.getElementById('btn-save-account').addEventListener('click', async ()=>{
       const acc = STATE.accounts.find(a=>a.id===SESSION.accountId);
       if(!acc){ toast('No se encontró tu cuenta'); return; }
@@ -5201,18 +5296,18 @@ try{ wireLoginHandlers(); }catch(e){ console.error('No se pudieron preparar los 
     const session = await storageGet('session', false);
     const sessionLooksValid = session && session.role && session.accountId;
     let accountStillExists = sessionLooksValid && STATE.accounts.some(a=>a.id===session.accountId);
-    if(sessionLooksValid && !accountStillExists && !firestoreFetchFailed){
+    if(sessionLooksValid && !accountStillExists && !anyStorageFailed()){
       // Puede ser una lectura vieja o parcial: reintentamos una vez más antes de cerrar la sesión
       const freshAccounts = await collectionGetAll('accounts');
       if(freshAccounts) STATE.accounts = freshAccounts;
       accountStillExists = STATE.accounts.some(a=>a.id===session.accountId);
     }
-    if(sessionLooksValid && (accountStillExists || firestoreFetchFailed)){
+    if(sessionLooksValid && (accountStillExists || anyStorageFailed())){
       SESSION = session;
       if(SESSION.role==='jugadora') STATE.activePlayerId = SESSION.playerId;
       if(SESSION.role==='pf') await loadPfPrefs();
       showApp();
-      if(firestoreFetchFailed) toast('No se pudo conectar con la base de datos. Algunos datos podrían no estar actualizados.');
+      if(anyStorageFailed()) toast('No se pudo conectar con la base de datos. Algunos datos podrían no estar actualizados.');
     } else {
       if(sessionLooksValid) console.error('Sesión guardada pero la cuenta no se encontró tras reintentar. accountId:', session.accountId);
       // Nota: NO llamamos a showLogin() acá — esa función resetea (borra) los campos de usuario/contraseña,
