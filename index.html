@@ -4490,10 +4490,12 @@ function startNotifPolling(){
   notifPollInterval = setInterval(async ()=>{
     const fresh = await collectionGetAll('notifications');
     if(!fresh) return;
-    const prevIds = new Set(STATE.notifications.map(n=>n.id));
     STATE.notifications = fresh;
-    const freshUnread = myNotifications().filter(n=>!n.readBy.includes(SESSION.playerId) && !prevIds.has(n.id));
-    freshUnread.forEach(n=>fireSystemNotification('Pincha Data', n.message));
+    // Nota: ya NO disparamos una notificación local acá. El aviso real llega por push
+    // (Firebase Cloud Messaging), aunque la app esté cerrada — si además la volviéramos
+    // a mostrar acá cada vez que se abre o refresca la app, parece que "llega recién
+    // al abrir la app", cuando en realidad ya había llegado antes. Este polling solo
+    // actualiza la campanita interna con lo que ya se mandó.
     refreshNotifBell();
   }, 60000);
 }
@@ -4502,9 +4504,8 @@ async function requestNotifPermissionOnce(){
     await registerAppServiceWorker();
     if(!('Notification' in window)) return;
     if(Notification.permission==='default'){ await Notification.requestPermission(); }
-    if(Notification.permission!=='granted') return;
-    const unread = myNotifications().filter(n=>!n.readBy.includes(SESSION.playerId));
-    unread.slice(0,3).forEach(n=>fireSystemNotification('Pincha Data', n.message));
+    // Nota: acá tampoco volvemos a disparar notificaciones de avisos ya existentes —
+    // ver comentario en startNotifPolling. El push real ya se encargó de avisar en su momento.
   }catch(e){ /* Notification API no disponible */ }
 }
 
