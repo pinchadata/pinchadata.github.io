@@ -22,15 +22,26 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-// Se dispara cuando llega un push y la app esta cerrada o en segundo plano.
-messaging.onBackgroundMessage(function (payload) {
-  const title = (payload.notification && payload.notification.title) || 'Pincha Data';
+// IMPORTANTE: no usamos messaging.onBackgroundMessage() acá a propósito.
+// Ese mecanismo depende de que el navegador reconozca automáticamente el
+// mensaje como "de tipo notificación" — y eso varía entre navegadores y
+// celulares, a veces con demora o directamente sin mostrarse. En cambio,
+// escuchamos el evento nativo 'push' del navegador, que SIEMPRE se dispara
+// apenas llega el mensaje (esté la app abierta, cerrada o en segundo plano),
+// sin depender de ninguna interpretación automática de Firebase.
+self.addEventListener('push', function (event) {
+  let payload = {};
+  try { payload = event.data ? event.data.json() : {}; } catch (e) { /* payload no era JSON */ }
+  const data = payload.data || payload.notification || {};
+  const title = data.title || 'Pincha Data';
+  const body = data.body || '';
   const options = {
-    body: (payload.notification && payload.notification.body) || '',
+    body: body,
     icon: './icon-192.png',
-    badge: './icon-192.png'
+    badge: './icon-192.png',
+    tag: 'pincha-data-' + Date.now()
   };
-  self.registration.showNotification(title, options);
+  event.waitUntil(self.registration.showNotification(title, options));
 });
 
 self.addEventListener('install', function () {
