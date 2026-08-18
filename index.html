@@ -3016,7 +3016,10 @@ function openInjuryModal(existing){
       </div>
       <div class="field-wrap"><label class="field">Etapa del protocolo de retorno al juego (RTP)</label><select id="inj-stage">${RTP_STAGES.map((s,idx)=>`<option value="${idx}" ${(i.stage!==undefined?i.stage:0)===idx?'selected':''}>${idx+1}. ${s}</option>`).join('')}</select></div>
       <div class="field-wrap"><label class="field"><input type="checkbox" id="inj-kine" style="width:auto; display:inline-block;" ${i.kinesio?'checked':''}> Asiste a kinesiología</label></div>
-      <button class="btn" id="inj-save">${existing?'Guardar cambios':'Registrar lesión'}</button>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <button class="btn" id="inj-save">${existing?'Guardar cambios':'Registrar lesión'}</button>
+        ${existing? `<button class="btn secondary" id="inj-delete" style="border-color:var(--red); color:var(--red);">🗑️ Eliminar lesión</button>` : ''}
+      </div>
     </div>
   </div>`;
   document.getElementById('modal-close').onclick = closeModal;
@@ -3028,6 +3031,13 @@ function openInjuryModal(existing){
       status: document.getElementById('inj-status').value, stage: Number(document.getElementById('inj-stage').value), kinesio: document.getElementById('inj-kine').checked };
     if(existing){ const idx=STATE.injuries.findIndex(x=>x.id===i.id); STATE.injuries[idx]=data; } else STATE.injuries.push(data);
     await saveInjuries(); closeModal(); toast('Lesión guardada'); renderScoreboard(); render();
+  };
+  const deleteBtn = document.getElementById('inj-delete');
+  if(deleteBtn) deleteBtn.onclick = async ()=>{
+    const p = getPlayer(i.playerId);
+    if(!confirm(`¿Eliminar la lesión "${i.type}" de ${p?p.name:'esta jugadora'}?\n\nEsto no se puede deshacer.`)) return;
+    STATE.injuries = STATE.injuries.filter(x=>x.id!==i.id);
+    await saveInjuries(); closeModal(); toast('Lesión eliminada'); renderScoreboard(); render();
   };
 }
 
