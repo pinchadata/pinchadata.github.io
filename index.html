@@ -852,7 +852,7 @@ const VIEW_TITLES = {
   settings:['Ajustes','Personalización de tu interfaz']
 };
 
-let STATE = { players:[], tests:[], injuries:[], wellness:[], analysis:[], accounts:[], notifications:[], events:[], exercises:[], plans:[], maxLifts:[], individualPlans:[], testBenchmarks:[], activePlayerId:null };
+let STATE = { players:[], tests:[], injuries:[], wellness:[], analysis:[], accounts:[], notifications:[], pushTokens:[], events:[], exercises:[], plans:[], maxLifts:[], individualPlans:[], testBenchmarks:[], activePlayerId:null };
 let SESSION = null;
 Chart.register({
   id:'valueLabels',
@@ -880,7 +880,18 @@ Chart.register({
 let PF_PREFS = {...DEFAULT_PREFS};
 
 function uid(){ return Math.random().toString(36).slice(2,10); }
-function todayStr(){ return new Date().toISOString().slice(0,10); }
+function dateStrLocal(d){
+  // Convierte cualquier objeto Date a texto AAAA-MM-DD usando siempre la hora LOCAL del
+  // dispositivo — nunca toISOString(), que da la fecha en UTC (Greenwich) y en Argentina
+  // (3 horas atrás) hace que la fecha se "adelante" un día a partir de las 21hs locales.
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+function todayStr(){
+  return dateStrLocal(new Date());
+}
 function fmtDate(d){ const dt=new Date(d+'T00:00:00'); return dt.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit'}); }
 function avg(arr){ const a=arr.filter(n=>!isNaN(n)); if(!a.length) return 0; return a.reduce((s,n)=>s+n,0)/a.length; }
 
@@ -1070,6 +1081,7 @@ async function loadAll(){
   const wellness = await loadCollectionWithMigration('wellness', 'wellness');
   const accounts = await loadCollectionWithMigration('accounts', 'accounts');
   const notifications = await loadCollectionWithMigration('notifications', 'notifications');
+  const pushTokens = await collectionGetAll('pushTokens');
   STATE.players = players || seedPlayers();
   let playersChanged = migratePositions();
   if(migrateCategories()) playersChanged = true;
@@ -1080,6 +1092,7 @@ async function loadAll(){
   STATE.wellness = wellness || seedWellness(STATE.players);
   STATE.accounts = accounts || [];
   STATE.notifications = notifications || [];
+  STATE.pushTokens = pushTokens || [];
   STATE.events = events || seedEvents();
   STATE.exercises = exercises || seedExercises();
   STATE.plans = plans || [];
@@ -1162,7 +1175,7 @@ function matchRestStats(pid){
     .map(e=>e.date).filter(d=>d<=today).sort();
   const lastMatch = matchDates.length ? matchDates[matchDates.length-1] : null;
   const daysSinceLast = lastMatch ? Math.round((new Date(today+'T00:00:00') - new Date(lastMatch+'T00:00:00'))/86400000) : null;
-  const cutoff = (()=>{ const d=new Date(today+'T00:00:00'); d.setDate(d.getDate()-14); return d.toISOString().slice(0,10); })();
+  const cutoff = (()=>{ const d=new Date(today+'T00:00:00'); d.setDate(d.getDate()-14); return dateStrLocal(d); })();
   const matchesLast14 = matchDates.filter(d=>d>=cutoff).length;
   let avgGapDays = null;
   if(matchDates.length>=2){
@@ -1190,7 +1203,7 @@ function computeLoadMetrics(pid){
 }
 function wellnessComplianceStats(){
   const today = todayStr();
-  const cutoff7 = (()=>{ const d=new Date(today+'T00:00:00'); d.setDate(d.getDate()-6); return d.toISOString().slice(0,10); })();
+  const cutoff7 = (()=>{ const d=new Date(today+'T00:00:00'); d.setDate(d.getDate()-6); return dateStrLocal(d); })();
   const loggedToday = STATE.players.filter(p=>STATE.wellness.some(w=>w.playerId===p.id && w.date===today));
   const daysLoggedPerPlayer = STATE.players.map(p=>new Set(STATE.wellness.filter(w=>w.playerId===p.id && w.date>=cutoff7 && w.date<=today).map(w=>w.date)).size);
   const neverLogged = STATE.players.filter(p=>!STATE.wellness.some(w=>w.playerId===p.id));
@@ -1199,7 +1212,7 @@ function wellnessComplianceStats(){
 }
 function playerWellnessAverages(pid, days=7){
   const today = todayStr();
-  const cutoff = (()=>{ const d=new Date(today+'T00:00:00'); d.setDate(d.getDate()-(days-1)); return d.toISOString().slice(0,10); })();
+  const cutoff = (()=>{ const d=new Date(today+'T00:00:00'); d.setDate(d.getDate()-(days-1)); return dateStrLocal(d); })();
   const recent = STATE.wellness.filter(w=>w.playerId===pid && w.date>=cutoff && w.date<=today);
   const all = STATE.wellness.filter(w=>w.playerId===pid).sort((a,b)=>a.date.localeCompare(b.date));
   const last = all.length ? all[all.length-1] : null;
@@ -1989,12 +2002,14 @@ async function fetchSharedDataIntoState(){
   const analysis = await collectionGetAll('analysis');
   const accounts = await collectionGetAll('accounts');
   const notifications = await collectionGetAll('notifications');
+  const pushTokens = await collectionGetAll('pushTokens');
   if(players) STATE.players = players;
   if(tests) STATE.tests = tests;
   if(injuries) STATE.injuries = injuries;
   if(wellness) STATE.wellness = wellness;
   if(accounts) STATE.accounts = accounts;
   if(notifications) STATE.notifications = notifications;
+  if(pushTokens) STATE.pushTokens = pushTokens;
   if(events) STATE.events = events;
   if(exercises) STATE.exercises = exercises;
   if(plans) STATE.plans = plans;
@@ -2165,6 +2180,9 @@ function mostRecentWellnessDate(){ if(STATE.wellness.length===0) return todayStr
 function viewDashboard(){
   const alerts = buildAlerts();
   const recentInjuries = [...STATE.injuries].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,4);
+  const activatedIds = new Set(STATE.pushTokens.filter(t=>t.role==='jugadora' && t.token).map(t=>t.playerId));
+  const withPush = STATE.players.filter(p=>activatedIds.has(p.id));
+  const withoutPush = STATE.players.filter(p=>!activatedIds.has(p.id));
   return `
   <div class="grid grid-2">
     <div class="card"><h3>Molestias reportadas hoy</h3>
@@ -2180,6 +2198,19 @@ function viewDashboard(){
     <div class="card"><h3>Plantel</h3><div class="kpi-big">${STATE.players.length}</div><div class="muted" style="font-size:12px;">jugadoras registradas</div></div>
     <div class="card"><h3>Wellness cargado (últ. fecha)</h3><div class="kpi-big">${STATE.wellness.filter(w=>w.date===mostRecentWellnessDate()).length}/${STATE.players.length}</div><div class="muted" style="font-size:12px;">${fmtDate(mostRecentWellnessDate())}</div></div>
     <div class="card"><h3>Testeos cargados</h3><div class="kpi-big">${STATE.tests.length}</div><div class="muted" style="font-size:12px;">registros históricos</div></div>
+  </div>
+  <div class="card" style="margin-top:16px;">
+    <h3>🔔 Notificaciones push activadas</h3>
+    <div class="section-sub">Solo a las jugadoras que ya tocaron "Activar notificaciones" en Ajustes les llega el aviso aunque tengan la app cerrada. Acá ves quién falta.</div>
+    <div class="grid grid-2" style="margin-top:10px;">
+      <div class="kpi-big" style="color:var(--green);">${withPush.length}/${STATE.players.length}</div>
+      <div></div>
+    </div>
+    ${withoutPush.length ? `
+    <div class="muted" style="font-size:12px; margin-top:10px; margin-bottom:6px;">Todavía no activaron (${withoutPush.length}):</div>
+    <div style="display:flex; flex-wrap:wrap; gap:6px;">
+      ${withoutPush.map(p=>`<span class="chip">${p.name}</span>`).join('')}
+    </div>` : `<div class="empty-state" style="margin-top:10px;">¡Todas activaron las notificaciones! 🎉</div>`}
   </div>
   `;
 }
@@ -3268,7 +3299,7 @@ function acwrTeamHTML(){
   }).join('');
 }
 function monitorListHTML(){
-  const cutoff = (()=>{ const d=new Date(mostRecentWellnessDate()+'T00:00:00'); d.setDate(d.getDate()-14); return d.toISOString().slice(0,10); })();
+  const cutoff = (()=>{ const d=new Date(mostRecentWellnessDate()+'T00:00:00'); d.setDate(d.getDate()-14); return dateStrLocal(d); })();
   const rows = STATE.players.map(p=>{
     const recs = STATE.analysis.filter(a=>a.playerId===p.id && a.date>=cutoff);
     if(!recs.length) return null;
@@ -3491,7 +3522,7 @@ function preMatchCategorySection(cat){
   if(!players.length) return '';
   const match = nextMatchInfoForCategory(cat);
   const ids = players.map(p=>p.id);
-  const cutoff7 = (()=>{ const d=new Date(); d.setDate(d.getDate()-7); return d.toISOString().slice(0,10); })();
+  const cutoff7 = (()=>{ const d=new Date(); d.setDate(d.getDate()-7); return dateStrLocal(d); })();
   const recentWellness = STATE.wellness.filter(w=>ids.includes(w.playerId) && w.date>=cutoff7);
   const avgFatigue = recentWellness.length? avg(recentWellness.map(w=>Number(w.fatigue))) : null;
   const avgSoreness = recentWellness.length? avg(recentWellness.map(w=>Number(w.soreness))) : null;
@@ -3857,7 +3888,7 @@ function matchProximityHTML(){
   if(!matches.length) return '<div class="empty-state">Cargá partidos en el calendario para ver este análisis.</div>';
   return matches.map(m=>{
     const matchDate = new Date(m.date+'T00:00:00');
-    const windowDates = [1,2,3].map(d=>{ const dt=new Date(matchDate); dt.setDate(dt.getDate()-d); return dt.toISOString().slice(0,10); });
+    const windowDates = [1,2,3].map(d=>{ const dt=new Date(matchDate); dt.setDate(dt.getDate()-d); return dateStrLocal(dt); });
     const entries = STATE.wellness.filter(w=>windowDates.includes(w.date));
     if(!entries.length) return `<div class="injury-row"><div style="flex:1;"><b>${fmtDate(m.date)} — ${m.label}</b><div class="muted" style="font-size:12px;">Sin wellness cargado en los 3 días previos.</div></div></div>`;
     const avgScore = avg(STATE.analysis.filter(a=>windowDates.includes(a.date)).map(a=>a.score));
@@ -4614,7 +4645,7 @@ function missingWellnessDays(playerId){
   const out = [];
   for(let i=1;i<=6;i++){
     const d = new Date(); d.setDate(d.getDate()-i);
-    const ds = d.toISOString().slice(0,10);
+    const ds = dateStrLocal(d);
     if(!isTrainingOrMatchDay(playerId, ds)) continue;
     if(!STATE.wellness.some(w=>w.playerId===playerId && w.date===ds)) out.push(ds);
   }
@@ -4624,7 +4655,7 @@ function missingPseDays(playerId){
   const out = [];
   for(let i=1;i<=6;i++){
     const d = new Date(); d.setDate(d.getDate()-i);
-    const ds = d.toISOString().slice(0,10);
+    const ds = dateStrLocal(d);
     if(!isTrainingOrMatchDay(playerId, ds)) continue;
     const entry = STATE.wellness.find(w=>w.playerId===playerId && w.date===ds);
     if(!entry) continue; // ese día ya se cuenta como wellness faltante por completo, no como PSE puntual
