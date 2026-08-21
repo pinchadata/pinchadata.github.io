@@ -1401,6 +1401,15 @@ function isJumpTest(testType){ return getNormalizationBasis(testType)==='height'
    quedó vacío o sospechosamente reducido sin que el usuario haya borrado nada a propósito, NO
    sobrescribimos lo que ya está guardado en la base. Así evitamos perder el plantel entero por
    un hiccup de conexión. */
+async function logSaveAttempt(key, fromCount, toCount, blocked){
+  try{
+    await fbDb.collection('saveAudit').add({
+      key, fromCount, toCount, blocked,
+      accountId: SESSION ? SESSION.accountId : null,
+      timestamp: new Date().toISOString()
+    });
+  }catch(e){ /* el log en sí nunca debe frenar el guardado real */ }
+}
 async function safeSaveCollection(key, arr, label){
   if(failedStorageKeys.has(key)){
     console.error(`Guardado de "${key}" cancelado: la última lectura/escritura de ESTA colección puntual falló. No se sobrescribe nada hasta reconectar.`);
@@ -1415,11 +1424,14 @@ async function safeSaveCollection(key, arr, label){
       const current = await storageGet(key, true);
       const currentLen = (current && Array.isArray(current)) ? current.length : 0;
       const drasticDrop = currentLen>=4 && arr.length < currentLen*0.5;
-      if(currentLen>0 && (arr.length===0 || drasticDrop)){
+      const wentToZero = currentLen>0 && arr.length===0;
+      if(currentLen>0 && (wentToZero || drasticDrop)){
         console.error(`Guardado de "${key}" bloqueado: se intentó pasar de ${currentLen} a ${arr.length} registro(s).`);
         toast(`⚠️ Se bloqueó un guardado que hubiera borrado gran parte de "${label}" (de ${currentLen} a ${arr.length}). Recargá la página e intentá de nuevo. Si el cambio era intencional (por ejemplo borraste varias jugadoras a propósito), avisale a soporte para hacerlo con cuidado.`);
+        await logSaveAttempt(key, currentLen, arr.length, true);
         return false;
       }
+      await logSaveAttempt(key, currentLen, arr.length, false);
     }catch(e){ /* si ni siquiera podemos chequear, mejor no arriesgarnos */ return false; }
   }
   return await storageSet(key, arr, true);
@@ -2421,8 +2433,16 @@ async function deletePlayerCascade(pid){
   STATE.individualPlans = STATE.individualPlans.filter(ip=>ip.playerId!==pid);
   affectedNotifications.forEach(n=>{ n.recipients = n.recipients.filter(id=>id!==pid); });
   STATE.accounts = STATE.accounts.filter(a=>a.playerId!==pid);
+  // Los guardados de colecciones "blob" van uno por uno (no en Promise.all): cada uno hace su
+  // propia lectura de verificación antes de escribir, y corridos en simultáneo podrían pisarse
+  // entre sí. Los borrados de documentos individuales (wellness, analysis, cuentas, notifs) sí
+  // son seguros en paralelo, porque cada uno toca solo su propio documento.
+  await savePlayers();
+  await saveTests();
+  await saveInjuries();
+  await saveMaxLifts();
+  await saveIndividualPlans();
   await Promise.all([
-    savePlayers(), saveTests(), saveInjuries(), saveMaxLifts(), saveIndividualPlans(),
     ...removedWellness.map(w=>deleteWellnessEntry(w.id)),
     ...removedAnalysis.map(a=>docDelete('analysis', a.id)),
     ...removedAccounts.map(a=>deleteAccountDoc(a.id)),
@@ -4892,16 +4912,21 @@ function myInjuryView(){
   const p = activePlayer();
   const mine = STATE.injuries.filter(i=>i.playerId===p.id).sort((a,b)=>b.date.localeCompare(a.date));
   return `<div class="card"><h3>Tu estado físico</h3>
+    <div class="section-sub">Podés actualizar cómo te sentís y si estás yendo a kinesiología. La gravedad, el estado y la etapa del protocolo los define tu PF.</div>
     ${mine.length? mine.map(i=>{ const stage = i.stage!==undefined?i.stage:0; const pct = Math.round((stage/(RTP_STAGES.length-1))*100); return `
-    <div class="injury-row" style="align-items:center;">
-      <div class="sev-dot" style="background:${sevColor(i.severity)}"></div>
-      <div style="flex:1;">
-        <div class="flex-between"><b>${i.type}</b><span class="badge ${i.status==='De alta'?'ok':i.status==='En recuperación'?'warn':'danger'}">${i.status}</span></div>
-        <div class="muted" style="font-size:12.5px; margin:4px 0;">${i.description}</div>
-        <div style="font-size:11.5px;"><span class="badge ${sevBadgeClass(i.severity)}">${i.severity}</span><span class="badge ${i.kinesio?'info':'warn'}">${i.kinesio?'Asiste a kinesiología':'No asiste a kinesiología'}</span> <span class="muted">Desde ${fmtDate(i.date)}</span></div>
-        <div class="muted" style="font-size:11px; margin-top:8px;">Protocolo de retorno al juego: ${RTP_STAGES[stage]}</div>
-        <div class="progress-bar"><div style="width:${pct}%;"></div></div>
+    <div class="injury-row" style="align-items:flex-start; flex-direction:column; gap:10px;">
+      <div style="display:flex; align-items:center; gap:10px; width:100%;">
+        <div class="sev-dot" style="background:${sevColor(i.severity)}"></div>
+        <div style="flex:1;">
+          <div class="flex-between"><b>${i.type}</b><span class="badge ${i.status==='De alta'?'ok':i.status==='En recuperación'?'warn':'danger'}">${i.status}</span></div>
+          <div style="font-size:11.5px; margin-top:4px;"><span class="badge ${sevBadgeClass(i.severity)}">${i.severity}</span> <span class="muted">Desde ${fmtDate(i.date)}</span></div>
+          <div class="muted" style="font-size:11px; margin-top:8px;">Protocolo de retorno al juego: ${RTP_STAGES[stage]}</div>
+          <div class="progress-bar"><div style="width:${pct}%;"></div></div>
+        </div>
       </div>
+      <div class="field-wrap" style="width:100%;"><label class="field">Cómo te sentís / notas</label><textarea data-myinj-desc="${i.id}">${i.description||''}</textarea></div>
+      <div class="field-wrap" style="width:100%;"><label class="field">¿Estás yendo a kinesiología?</label><select data-myinj-kine="${i.id}"><option value="no" ${!i.kinesio?'selected':''}>No</option><option value="si" ${i.kinesio?'selected':''}>Sí</option></select></div>
+      <button type="button" class="btn secondary sm" data-myinj-save="${i.id}">Guardar cambios</button>
     </div>`; }).join('') : '<div class="empty-state">No tenés lesiones registradas. ¡Seguí así!</div>'}
   </div>`;
 }
@@ -4992,6 +5017,18 @@ function afterRender(){
     }
   }
   if(currentView==='my-tests'){ drawProfileCharts(SESSION.playerId); }
+  if(currentView==='my-injury'){
+    document.querySelectorAll('[data-myinj-save]').forEach(btn=>btn.addEventListener('click', async ()=>{
+      const injId = btn.dataset.myinjSave;
+      const idx = STATE.injuries.findIndex(i=>i.id===injId);
+      if(idx===-1) return;
+      const descEl = document.querySelector(`[data-myinj-desc="${injId}"]`);
+      const kineEl = document.querySelector(`[data-myinj-kine="${injId}"]`);
+      STATE.injuries[idx] = { ...STATE.injuries[idx], description: descEl.value.trim(), kinesio: kineEl.value==='si' };
+      const ok = await saveInjuries();
+      if(ok) toast('Actualizado — gracias por contarnos cómo estás'); else render();
+    }));
+  }
   if(currentView==='planning'){
     if(SESSION.role==='pf') renderPlanningTab();
     wireDayTabs();
