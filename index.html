@@ -979,7 +979,7 @@ async function initFirebase(){
     }
     firebase.initializeApp(firebaseConfig);
     fbDb = firebase.firestore();
-    await withTimeout(firebase.auth().signInAnonymously(), 8000, 'inicio de sesión anónimo de Firebase');
+    await withTimeout(firebase.auth().signInAnonymously(), 15000, 'inicio de sesión anónimo de Firebase');
     firebaseReady = true;
   }catch(e){ console.error('No se pudo iniciar Firebase, se usa almacenamiento local', e); firebaseReady=false; }
 }
@@ -994,7 +994,7 @@ function anyStorageFailed(){ return failedStorageKeys.size > 0; }
 async function storageGet(key, shared){
   if(shared && firebaseReady){
     try{
-      const doc = await withTimeout(fbDb.collection('app_data').doc(key).get(), 8000, 'lectura de '+key);
+      const doc = await withTimeout(fbDb.collection('app_data').doc(key).get(), 15000, 'lectura de '+key);
       failedStorageKeys.delete(key); // se pudo leer bien esta clave puntual: la sacamos de la lista de fallos
       return doc.exists ? JSON.parse(doc.data().value) : null;
     }catch(e){
@@ -1007,14 +1007,14 @@ async function storageGet(key, shared){
 }
 async function storageSet(key, value, shared){
   if(shared && firebaseReady){
-    try{ await withTimeout(fbDb.collection('app_data').doc(key).set({value: JSON.stringify(value)}), 8000, 'guardado de '+key); failedStorageKeys.delete(key); return true; }
+    try{ await withTimeout(fbDb.collection('app_data').doc(key).set({value: JSON.stringify(value)}), 15000, 'guardado de '+key); failedStorageKeys.delete(key); return true; }
     catch(e){ console.error('Firestore set error', e); failedStorageKeys.add(key); return false; }
   }
   try{ localStorage.setItem(LS_PREFIX+key, JSON.stringify(value)); return true; }catch(e){ console.error('storage error', e); return false; }
 }
 async function storageDelete(key, shared){
   if(shared && firebaseReady){
-    try{ await withTimeout(fbDb.collection('app_data').doc(key).delete(), 8000, 'borrado de '+key); failedStorageKeys.delete(key); return; }catch(e){ /* ignore */ }
+    try{ await withTimeout(fbDb.collection('app_data').doc(key).delete(), 15000, 'borrado de '+key); failedStorageKeys.delete(key); return; }catch(e){ /* ignore */ }
   }
   try{ localStorage.removeItem(LS_PREFIX+key); }catch(e){ /* ignore */ }
 }
@@ -1025,7 +1025,7 @@ async function storageDelete(key, shared){
 async function collectionGetAll(name){
   if(firebaseReady){
     try{
-      const snap = await withTimeout(fbDb.collection(name).get(), 15000, 'lectura de colección '+name);
+      const snap = await withTimeout(fbDb.collection(name).get(), 25000, 'lectura de colección '+name);
       failedStorageKeys.delete(name);
       return snap.docs.map(d=>d.data());
     }catch(e){ console.error('Firestore collection get error', name, e); failedStorageKeys.add(name); return null; }
@@ -1034,7 +1034,7 @@ async function collectionGetAll(name){
 }
 async function docSet(name, id, data){
   if(firebaseReady){
-    try{ await withTimeout(fbDb.collection(name).doc(id).set(data), 8000, 'guardado de '+name); return true; }
+    try{ await withTimeout(fbDb.collection(name).doc(id).set(data), 15000, 'guardado de '+name); return true; }
     catch(e){ console.error('Firestore doc set error', name, e); return false; }
   }
   try{
@@ -1048,7 +1048,7 @@ async function docSet(name, id, data){
 }
 async function docDelete(name, id){
   if(firebaseReady){
-    try{ await withTimeout(fbDb.collection(name).doc(id).delete(), 8000, 'borrado de '+name); return; }catch(e){ /* ignore */ }
+    try{ await withTimeout(fbDb.collection(name).doc(id).delete(), 15000, 'borrado de '+name); return; }catch(e){ /* ignore */ }
     return;
   }
   try{
@@ -1074,10 +1074,19 @@ async function loadCollectionWithMigration(name, legacyKey){
 }
 
 async function loadAll(){
-  const [players, tests, injuries, events, exercises, plans, maxLifts, individualPlans, testBenchmarks] = await Promise.all([
-    storageGet('players', true), storageGet('tests', true), storageGet('injuries', true),
-    storageGet('events', true), storageGet('exercises', true), storageGet('plans', true), storageGet('maxlifts', true), storageGet('individualplans', true), storageGet('testbenchmarks', true)
-  ]);
+  // Antes estas 9 lecturas salían todas juntas (Promise.all) apenas se entraba a la app —
+  // eso satura la conexión justo en el momento más sensible (el primer ingreso) y es la causa
+  // más probable de los "error de conexión" al querer entrar. Ahora van una por una: el
+  // ingreso puede tardar un poco más, pero es mucho más confiable, sobre todo en celular.
+  const players = await storageGet('players', true);
+  const tests = await storageGet('tests', true);
+  const injuries = await storageGet('injuries', true);
+  const events = await storageGet('events', true);
+  const exercises = await storageGet('exercises', true);
+  const plans = await storageGet('plans', true);
+  const maxLifts = await storageGet('maxlifts', true);
+  const individualPlans = await storageGet('individualplans', true);
+  const testBenchmarks = await storageGet('testbenchmarks', true);
   const wellness = await loadCollectionWithMigration('wellness', 'wellness');
   const accounts = await loadCollectionWithMigration('accounts', 'accounts');
   const notifications = await loadCollectionWithMigration('notifications', 'notifications');
@@ -2002,14 +2011,21 @@ function startSharedDataPolling(){
     // En cualquier otra pantalla, los datos ya quedan actualizados por dentro y se van a ver
     // frescos apenas la persona navegue a otra sección, sin arriesgarnos a borrarle algo a mitad de escribir.
     if(SESSION && SESSION.role==='pf' && currentView==='dashboard'){ renderScoreboard(); render(); }
-  }, 45000);
+  }, 120000);
 }
 async function fetchSharedDataIntoState(){
   if(!firebaseReady) return;
-  const [players, tests, injuries, events, exercises, plans] = await Promise.all([
-    storageGet('players', true), storageGet('tests', true), storageGet('injuries', true),
-    storageGet('events', true), storageGet('exercises', true), storageGet('plans', true)
-  ]);
+  // Antes estas 6 lecturas salían todas juntas al mismo tiempo (Promise.all), lo que satura
+  // la conexión en celular y hace que TODAS tarden más (compitiendo entre sí por el mismo
+  // ancho de banda) — a veces incluso pasando el tiempo de espera aunque el archivo sea chico.
+  // Ahora van una por una: tarda un poco más el ciclo completo, pero cada consulta individual
+  // es mucho más confiable.
+  const players = await storageGet('players', true);
+  const tests = await storageGet('tests', true);
+  const injuries = await storageGet('injuries', true);
+  const events = await storageGet('events', true);
+  const exercises = await storageGet('exercises', true);
+  const plans = await storageGet('plans', true);
   const wellness = await collectionGetAll('wellness');
   const analysis = await collectionGetAll('analysis');
   const accounts = await collectionGetAll('accounts');
@@ -4638,18 +4654,20 @@ function syncBodyHighlights(){
 function openPainEditor(part){
   const editor = document.getElementById('pain-editor');
   let entry = selectedPainAreas.find(a=>a.part===part);
+  const yaExistia = !!entry;
   if(!entry){ entry = {part, scale:5, note:''}; selectedPainAreas.push(entry); }
   editor.innerHTML = `
   <div class="card" style="background:var(--bg-raise);"><h3>${part}</h3>
+    ${yaExistia? `<div class="section-sub" style="color:var(--green); font-weight:700;">✓ Ya habías marcado esta zona — podés ajustarla si cambió, o dejarla así.</div>` : ''}
     <div class="pain-slider-wrap"><input type="range" min="0" max="10" id="pain-scale-input" value="${entry.scale}"><div class="pain-scale-num" id="pain-scale-display">${entry.scale}</div></div>
     <div class="field-wrap" style="margin-top:10px;"><label class="field">¿Cómo fue / cuándo aparece?</label><textarea id="pain-note-input" placeholder="Ej: aparece al saltar, punzante, desde el entrenamiento de ayer...">${entry.note}</textarea></div>
-    <button class="btn sm" id="pain-save-btn">Guardar zona</button>
+    <button class="btn sm" id="pain-save-btn">${yaExistia?'Actualizar zona':'Guardar zona'}</button>
   </div>`;
   const range = document.getElementById('pain-scale-input');
   range.addEventListener('input',()=>{ document.getElementById('pain-scale-display').textContent = range.value; });
   document.getElementById('pain-save-btn').addEventListener('click',()=>{
     entry.scale = Number(range.value); entry.note = document.getElementById('pain-note-input').value;
-    syncBodyHighlights(); renderPainChips(); editor.innerHTML=''; toast('Zona registrada');
+    syncBodyHighlights(); renderPainChips(); editor.innerHTML=''; toast(yaExistia?'Zona actualizada':'Zona registrada');
   });
 }
 
@@ -4865,8 +4883,8 @@ function wellnessPostFormHTML(p, targetDate, isToday, myCats){
     <div class="load-total"><span class="muted">Minutos totales: <b id="w-total-val" style="color:var(--white); font-family:var(--font-mono);">${wellnessDraft.ball+wellnessDraft.fitness+wellnessDraft.match} min</b></span></div>
   </div>
   <div class="card" style="margin-bottom:16px;">
-    <h3>Percepción del esfuerzo (PSE) — post-entrenamiento <span class="badge danger" style="margin-left:4px;">Obligatorio</span></h3>
-    <div class="section-sub">Escala de Borg (0 a 10). Marcá las dos por separado — son cargas distintas.</div>
+    <h3>Percepción del esfuerzo (PSE) — post-entrenamiento</h3>
+    <div class="section-sub">Escala de Borg (0 a 10). Marcá las dos por separado — son cargas distintas. Es importante que sea real, aunque el valor por defecto ya te deje guardar.</div>
     <div class="field-wrap">
       <div style="display:flex; align-items:baseline; justify-content:space-between;">
         <span class="load-name">🏋️ PSE Físico</span>
@@ -5195,15 +5213,42 @@ function afterRender(){
     async function persistWellness(fields){
       const p = activePlayer();
       const saveDate = wellnessTargetDate || todayStr();
-      const existingIdx = STATE.wellness.findIndex(w=>w.playerId===p.id && w.date===saveDate);
       let entryData;
-      if(existingIdx>-1){ entryData = {...STATE.wellness[existingIdx], ...fields}; }
-      else { entryData = {id:uid(), playerId:p.id, date:saveDate, ...fields}; }
+      if(!firebaseReady){
+        // Modo local (sin Firebase): acá no hay riesgo de desincronización entre dispositivos,
+        // así que alcanza con mirar la copia en memoria como antes.
+        const existingIdx = STATE.wellness.findIndex(w=>w.playerId===p.id && w.date===saveDate);
+        entryData = existingIdx>-1 ? {...STATE.wellness[existingIdx], ...fields} : {id:uid(), playerId:p.id, date:saveDate, ...fields};
+      } else {
+      try{
+        // Consultamos directo a Firestore (no la copia en memoria del celular, que puede estar
+        // desactualizada si hubo problemas de conexión) para saber con certeza si YA existe un
+        // registro de este día. Así evitamos crear duplicados si alguien toca "Guardar" varias
+        // veces pensando que no funcionó (por ejemplo, con mala conexión).
+        const snap = await withTimeout(
+          fbDb.collection('wellness').where('playerId','==',p.id).where('date','==',saveDate).limit(1).get(),
+          15000, 'chequeo de wellness existente'
+        );
+        if(!snap.empty){
+          const doc = snap.docs[0];
+          entryData = { ...doc.data(), ...fields, id: doc.id };
+        } else {
+          entryData = { id:uid(), playerId:p.id, date:saveDate, ...fields };
+        }
+      }catch(e){
+        // Si ni siquiera pudimos chequear (sin conexión de verdad), no arriesgamos crear un
+        // duplicado a ciegas — mejor avisar y que reintente cuando haya señal.
+        console.error('No se pudo verificar si ya existía un wellness de hoy', e);
+        toast('⚠️ No hay conexión suficiente para guardar de forma segura. Esperá a tener señal e intentá de nuevo — así evitamos que se duplique.');
+        return null;
+      }
+      }
       const ok = await saveWellnessEntry(entryData);
       if(!ok){
         toast('⚠️ No se pudo guardar — revisá tu conexión a internet e intentá de nuevo. Todavía no se perdió lo que cargaste, solo tocá el botón otra vez.');
         return null;
       }
+      const existingIdx = STATE.wellness.findIndex(w=>w.id===entryData.id);
       if(existingIdx>-1) STATE.wellness[existingIdx]=entryData; else STATE.wellness.push(entryData);
       return entryData;
     }
