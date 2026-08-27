@@ -392,6 +392,20 @@ input[type=range]::-moz-range-thumb{width:19px; height:19px; border-radius:50%; 
 #install-banner b{display:block; font-size:13px;}
 #install-banner button{background:rgba(255,255,255,0.18); border:none; color:var(--white); padding:7px 12px; border-radius:8px; font-size:11.5px; font-weight:600; cursor:pointer; flex-shrink:0;}
 #install-banner .ib-close{background:none; padding:4px 8px; font-size:15px;}
+.global-banner-alert{
+  display:flex; align-items:center; gap:12px; justify-content:space-between;
+  background:linear-gradient(90deg, var(--amber), #b9812a); color:#1a1400;
+  padding:12px 16px; font-size:13px; font-weight:700; cursor:pointer;
+}
+.global-banner-alert button{background:rgba(0,0,0,0.18); border:none; color:#1a1400; padding:8px 14px; border-radius:8px; font-size:12px; font-weight:700; cursor:pointer; flex-shrink:0;}
+#floating-back-btn{
+  position:fixed; left:14px; bottom:78px; z-index:15;
+  background:var(--bg-panel-2); color:var(--white); border:1.5px solid var(--line);
+  border-radius:20px; padding:9px 16px; font-size:12.5px; font-weight:700; cursor:pointer;
+  box-shadow:0 3px 10px rgba(0,0,0,0.4);
+}
+#floating-back-btn:active{ background:var(--bg-raise); }
+@media (min-width:900px){ #floating-back-btn{ display:none !important; } }
 #install-steps{ display:none; position:fixed; inset:0; z-index:1001; background:rgba(0,0,0,0.65); align-items:flex-end; justify-content:center; }
 #install-steps .sheet{ background:var(--bg-panel-2); border-radius:18px 18px 0 0; padding:22px 22px 34px; width:100%; max-width:480px; }
 #install-steps h3{font-family:var(--font-display); font-size:17px; margin-bottom:12px;}
@@ -579,9 +593,11 @@ input[type=range]::-moz-range-thumb{width:19px; height:19px; border-radius:50%; 
       <button class="ib-close" id="ib-dismiss">✕</button>
     </div>
     <div class="scoreboard" id="scoreboard"></div>
+    <div id="global-pse-banner"></div>
     <div class="view" id="view-root"></div>
   </div>
   <nav id="bottom-nav"></nav>
+  <button id="floating-back-btn" style="display:none;">← Volver</button>
 </div>
 <div id="modal-root"></div>
 <div id="install-steps"><div class="sheet">
@@ -835,6 +851,7 @@ const JUGADORA_NAV = [
   {view:'my-rm', icon:'🏋️‍♀️', label:'RM'},
   {view:'my-tests', icon:'●', label:'Mis testeos'},
   {view:'my-injury', icon:'✚', label:'Mi estado físico'},
+  {view:'ofd', icon:'🎥', label:'OFD'},
   {view:'settings', icon:'⚙', label:'Ajustes'},
 ];
 const VIEW_TITLES = {
@@ -1951,6 +1968,13 @@ async function enterSessionForAccount(acc){
 async function logout(){
   await storageDelete('session', false);
   SESSION = null;
+  // Reseteamos toda la navegación "en qué jugadora estaba parado/a" — si dos personas
+  // comparten el mismo dispositivo, la siguiente que entre tiene que arrancar en la lista,
+  // no quedar pegada en el detalle de quien usó la app antes.
+  ofdSelectedPlayer = null; ofdCompareA = null; ofdCompareB = null;
+  pfWellnessSelectedPlayer = null;
+  selectedPlayerForProfile = null;
+  currentBackAction = null;
   document.getElementById('modal-root').innerHTML='';
   showLogin();
 }
@@ -2003,6 +2027,7 @@ function showApp(){
   if(SESSION.role==='pf') autoBackupIfNeeded();
   applyTheme();
   setupSwipeNav();
+  setupFloatingBackButton();
   maybeShowInstallBanner();
   navigate(SESSION.role==='pf' ? 'dashboard' : 'wellness');
   showWelcomeModal();
@@ -2109,6 +2134,22 @@ function navigate(view, slideDir){
 }
 /* Swipe left/right over the content area moves to the next/previous menu item */
 let swipeNavInitialized = false;
+let floatingBackInitialized = false;
+function setupFloatingBackButton(){
+  if(floatingBackInitialized) return;
+  floatingBackInitialized = true;
+  const btn = document.getElementById('floating-back-btn');
+  if(!btn) return;
+  btn.addEventListener('click', ()=>{ if(currentBackAction) currentBackAction(); });
+  const updateVisibility = ()=>{
+    const scrolled = window.scrollY > 160;
+    btn.style.display = (scrolled && currentBackAction) ? 'block' : 'none';
+  };
+  window.addEventListener('scroll', updateVisibility, {passive:true});
+  // También lo revisamos después de cada render (por si cambia de vista sin scrollear,
+  // por ejemplo entrando directo a una pantalla ya scrolleada desde antes).
+  setInterval(updateVisibility, 400);
+}
 function setupSwipeNav(){
   if(swipeNavInitialized) return;
   swipeNavInitialized = true;
@@ -2169,6 +2210,36 @@ function showInstallSteps(){
 }
 const chartRegistry = {};
 function destroyCharts(){ Object.values(chartRegistry).forEach(c=>c && c.destroy && c.destroy()); }
+function refreshGlobalPseBanner(){
+  const container = document.getElementById('global-pse-banner');
+  if(!container) return;
+  if(!SESSION || SESSION.role!=='jugadora'){ container.innerHTML=''; return; }
+  const today = todayStr();
+  const entry = STATE.wellness.find(w=>w.playerId===SESSION.playerId && w.date===today);
+  const postDone = entry ? (entry.postDone!==undefined ? entry.postDone : true) : false;
+  const preDone = entry ? (entry.preDone!==undefined ? entry.preDone : true) : false;
+  const hayEntrenoHoy = isTrainingOrMatchDay(SESSION.playerId, today);
+  let mensaje = null;
+  // Solo avisamos si no estamos ya parados en la pantalla de Wellness (ahí ya lo ve
+  // directamente en el formulario, no hace falta duplicarlo).
+  if(currentView!=='wellness'){
+    if(hayEntrenoHoy && !preDone){
+      mensaje = { text:'📋 Te falta completar el wellness de hoy', label:'Completar ahora' };
+    } else if(preDone && !postDone){
+      mensaje = { text:'🏋️ Te falta completar la PSE de hoy', label:'Completar ahora' };
+    }
+  }
+  if(mensaje){
+    container.innerHTML = `
+    <div class="global-banner-alert" id="global-pse-btn">
+      <span>${mensaje.text}</span>
+      <button type="button" class="btn sm">${mensaje.label}</button>
+    </div>`;
+    document.getElementById('global-pse-btn').addEventListener('click', ()=>navigate('wellness'));
+  } else {
+    container.innerHTML = '';
+  }
+}
 function render(){
   destroyCharts();
   const root = document.getElementById('view-root');
@@ -2285,10 +2356,13 @@ function wellnessValSpan(type, value, text){
   const c = wellnessValueColor(type, value);
   return c ? `<span style="color:${c}; font-weight:700;">${text}</span>` : text;
 }
+let currentBackAction = null;
 let ofdSelectedPlayer = null;
 let ofdCompareA = null;
 let ofdCompareB = null;
 function viewOfd(){
+  const isJugadora = SESSION.role==='jugadora';
+  if(isJugadora) ofdSelectedPlayer = SESSION.playerId;
   if(!ofdSelectedPlayer || !getPlayer(ofdSelectedPlayer)){
     ofdSelectedPlayer = null;
     return `
@@ -2313,11 +2387,11 @@ function viewOfd(){
   const recA = sessions.find(s=>s.date===ofdCompareA);
   const recB = sessions.find(s=>s.date===ofdCompareB);
   return `
-  <button class="btn secondary sm" id="btn-ofd-back" style="margin-bottom:14px;">← Volver al listado</button>
+  ${!isJugadora? `<button class="btn secondary sm" id="btn-ofd-back" style="margin-bottom:14px;">← Volver al listado</button>` : ''}
   <div class="card" style="margin-bottom:16px;">
-    <div class="flex-between"><h3>${p.name}</h3><button class="btn secondary sm" id="btn-ofd-add">+ Agregar evaluación</button></div>
+    <div class="flex-between"><h3>${isJugadora?'Tu OFD':p.name}</h3>${!isJugadora? `<button class="btn secondary sm" id="btn-ofd-add">+ Agregar evaluación</button>` : ''}</div>
     <div class="section-sub">${sessions.length} evaluación${sessions.length!==1?'es':''} cargada${sessions.length!==1?'s':''}.</div>
-    ${sessions.length===0? '<div class="empty-state">Todavía no hay ninguna evaluación cargada para esta jugadora.</div>' : ''}
+    ${sessions.length===0? `<div class="empty-state">Todavía no hay ninguna evaluación cargada${isJugadora?' — hablá con tu PF':''}.</div>` : ''}
   </div>
   ${sessions.length>=1? `
   <div class="card" style="margin-bottom:16px;">
@@ -2329,48 +2403,26 @@ function viewOfd(){
   </div>
   <div class="card" style="margin-bottom:16px;">
     <h3>Vista frontal</h3>
-    <div class="section-sub">${recA?fmtDate(recA.date):'—'} vs. ${recB?fmtDate(recB.date):'—'}</div>
-    <button type="button" class="btn" id="btn-ofd-compare-frontal" style="margin-top:10px;" ${(!recA?.frontalUrl && !recB?.frontalUrl)?'disabled':''}>👁 Comparar vista frontal</button>
+    <div class="grid grid-2">
+      <div><div class="muted" style="font-size:12px; margin-bottom:6px;">${recA?fmtDate(recA.date):'—'}</div><div style="aspect-ratio:9/16; background:#000; border-radius:10px; overflow:hidden;">${mediaEmbedHTML(recA?recA.frontalUrl:null,'video/foto frontal')}</div></div>
+      <div><div class="muted" style="font-size:12px; margin-bottom:6px;">${recB?fmtDate(recB.date):'—'}</div><div style="aspect-ratio:9/16; background:#000; border-radius:10px; overflow:hidden;">${mediaEmbedHTML(recB?recB.frontalUrl:null,'video/foto frontal')}</div></div>
+    </div>
   </div>
   <div class="card" style="margin-bottom:16px;">
     <h3>Vista lateral</h3>
-    <div class="section-sub">${recA?fmtDate(recA.date):'—'} vs. ${recB?fmtDate(recB.date):'—'}</div>
-    <button type="button" class="btn" id="btn-ofd-compare-lateral" style="margin-top:10px;" ${(!recA?.lateralUrl && !recB?.lateralUrl)?'disabled':''}>👁 Comparar vista lateral</button>
-  </div>
+    <div class="grid grid-2">
+      <div><div class="muted" style="font-size:12px; margin-bottom:6px;">${recA?fmtDate(recA.date):'—'}</div><div style="aspect-ratio:9/16; background:#000; border-radius:10px; overflow:hidden;">${mediaEmbedHTML(recA?recA.lateralUrl:null,'video/foto lateral')}</div></div>
+      <div><div class="muted" style="font-size:12px; margin-bottom:6px;">${recB?fmtDate(recB.date):'—'}</div><div style="aspect-ratio:9/16; background:#000; border-radius:10px; overflow:hidden;">${mediaEmbedHTML(recB?recB.lateralUrl:null,'video/foto lateral')}</div></div>
     </div>
   </div>
   <div class="card">
     <h3>Evaluaciones cargadas</h3>
     ${sessions.map(s=>`<div class="injury-row"><div style="flex:1;"><b>${fmtDate(s.date)}</b></div>
-      <button type="button" class="btn ghost sm" data-ofd-edit="${s.id}">✏️</button>
-      <button type="button" class="btn ghost sm" data-ofd-del="${s.id}">🗑️</button>
+      ${!isJugadora? `<button type="button" class="btn ghost sm" data-ofd-edit="${s.id}">✏️</button>
+      <button type="button" class="btn ghost sm" data-ofd-del="${s.id}">🗑️</button>` : ''}
     </div>`).join('')}
   </div>` : ''}
   `;
-}
-function openOfdCompareModal(recA, recB, viewLabel, field){
-  const modal = document.getElementById('modal-root');
-  const urlA = recA ? recA[field] : null;
-  const urlB = recB ? recB[field] : null;
-  modal.innerHTML = `
-  <div class="modal-overlay" id="modal-overlay">
-    <div class="modal" style="max-width:900px; width:95vw;">
-      <button class="close-x" id="modal-close">✕</button>
-      <h3 style="margin-bottom:14px;">Comparación — Vista ${viewLabel}</h3>
-      <div class="grid grid-2">
-        <div>
-          <div class="muted" style="font-size:12.5px; margin-bottom:8px; text-align:center;"><b>${recA?fmtDate(recA.date):'Sin fecha A'}</b></div>
-          <div style="aspect-ratio:9/16; background:#000; border-radius:10px; overflow:hidden;">${mediaEmbedHTML(urlA, 'video/foto '+viewLabel)}</div>
-        </div>
-        <div>
-          <div class="muted" style="font-size:12.5px; margin-bottom:8px; text-align:center;"><b>${recB?fmtDate(recB.date):'Sin fecha B'}</b></div>
-          <div style="aspect-ratio:9/16; background:#000; border-radius:10px; overflow:hidden;">${mediaEmbedHTML(urlB, 'video/foto '+viewLabel)}</div>
-        </div>
-      </div>
-    </div>
-  </div>`;
-  document.getElementById('modal-close').onclick = closeModal;
-  document.getElementById('modal-overlay').onclick = (e)=>{ if(e.target.id==='modal-overlay') closeModal(); };
 }
 function openOfdModal(pid, existing){
   const modal = document.getElementById('modal-root');
@@ -2657,7 +2709,12 @@ function wireRosterTab(){
   if(rosterTab==='plantel'){
     document.querySelectorAll('.player-card').forEach(card=>card.addEventListener('click',()=>{ selectedPlayerForProfile=card.dataset.pid; renderRosterTab(); drawProfileCharts(card.dataset.pid); }));
     const back = document.getElementById('btn-back-roster');
-    if(back) back.addEventListener('click',()=>{ selectedPlayerForProfile=null; renderRosterTab(); });
+    currentBackAction = null;
+    if(back){
+      const backFn = ()=>{ selectedPlayerForProfile=null; renderRosterTab(); };
+      back.addEventListener('click', backFn);
+      currentBackAction = backFn;
+    }
     const delBtn = document.getElementById('btn-delete-player');
     if(delBtn) delBtn.addEventListener('click', async ()=>{
       const p = getPlayer(delBtn.dataset.delplayer);
@@ -5172,6 +5229,8 @@ function viewSettings(){
 
 /* =============================== AFTER RENDER WIRING =============================== */
 function afterRender(){
+  refreshGlobalPseBanner();
+  currentBackAction = null;
   if(currentView==='roster') renderRosterTab();
   if(currentView==='reports'){ renderReportTab(); document.querySelectorAll('[data-repttab]').forEach(b=>b.addEventListener('click',()=>{ reportTab=b.dataset.repttab; render(); })); }
   if(currentView==='analysis'){
@@ -5182,7 +5241,9 @@ function afterRender(){
   if(currentView==='pf-wellness'){
     if(pfWellnessSelectedPlayer){
       renderAnalysisBody(pfWellnessSelectedPlayer);
-      document.getElementById('btn-back-pfwellness').addEventListener('click', ()=>{ pfWellnessSelectedPlayer=null; render(); });
+      const backFn = ()=>{ pfWellnessSelectedPlayer=null; render(); };
+      document.getElementById('btn-back-pfwellness').addEventListener('click', backFn);
+      currentBackAction = backFn;
     } else {
       document.querySelectorAll('[data-pfwellness-player]').forEach(row=>row.addEventListener('click', ()=>{ pfWellnessSelectedPlayer=row.dataset.pfwellnessPlayer; render(); }));
     }
@@ -5192,7 +5253,11 @@ function afterRender(){
       document.querySelectorAll('[data-ofd-player]').forEach(row=>row.addEventListener('click', ()=>{ ofdSelectedPlayer=row.dataset.ofdPlayer; ofdCompareA=null; ofdCompareB=null; render(); }));
     } else {
       const backBtn = document.getElementById('btn-ofd-back');
-      if(backBtn) backBtn.addEventListener('click', ()=>{ ofdSelectedPlayer=null; render(); });
+      if(backBtn){
+        const backFn = ()=>{ ofdSelectedPlayer=null; render(); };
+        backBtn.addEventListener('click', backFn);
+        currentBackAction = backFn;
+      }
       const addBtn = document.getElementById('btn-ofd-add');
       if(addBtn) addBtn.addEventListener('click', ()=>openOfdModal(ofdSelectedPlayer, null));
       const selA = document.getElementById('ofd-select-a');
