@@ -2220,7 +2220,7 @@ function showInstallSteps(){
   document.getElementById('install-steps-close').onclick = ()=>{ sheet.style.display='none'; };
 }
 const chartRegistry = {};
-function destroyCharts(){ Object.values(chartRegistry).forEach(c=>c && c.destroy && c.destroy()); }
+function destroyCharts(){ Object.keys(chartRegistry).forEach(k=>{ if(chartRegistry[k] && chartRegistry[k].destroy) chartRegistry[k].destroy(); delete chartRegistry[k]; }); }
 function refreshGlobalPseBanner(){
   const container = document.getElementById('global-pse-banner');
   if(!container) return;
@@ -2718,7 +2718,7 @@ function compareHTML(){
 function wireRosterTab(){
   document.querySelectorAll('[data-rtab]').forEach(b=>b.addEventListener('click',()=>{ rosterTab=b.dataset.rtab; selectedPlayerForProfile=null; render(); }));
   if(rosterTab==='plantel'){
-    document.querySelectorAll('.player-card').forEach(card=>card.addEventListener('click',()=>{ selectedPlayerForProfile=card.dataset.pid; renderRosterTab(); drawProfileCharts(card.dataset.pid); }));
+    document.querySelectorAll('.player-card').forEach(card=>card.addEventListener('click',()=>{ selectedPlayerForProfile=card.dataset.pid; renderRosterTab(); }));
     const back = document.getElementById('btn-back-roster');
     currentBackAction = null;
     if(back){
@@ -2896,7 +2896,12 @@ function drawProfileCharts(pid){
     const canvas = document.getElementById('chart-profile-'+slug(type));
     if(!canvas) return;
     const unit = arr[0].unit || '';
-    chartRegistry['profile-'+slug(type)] = new Chart(canvas.getContext('2d'), {
+    const key = 'profile-'+slug(type);
+    // Por las dudas esta función se llegue a disparar dos veces seguidas para el mismo canvas
+    // (como pasaba antes al tocar una jugadora), destruimos cualquier gráfico previo en ese
+    // mismo lugar antes de crear el nuevo — Chart.js no permite reusar un canvas sin esto.
+    if(chartRegistry[key] && chartRegistry[key].destroy) chartRegistry[key].destroy();
+    chartRegistry[key] = new Chart(canvas.getContext('2d'), {
       type:'line', data:{ labels: arr.map(t=>fmtDate(t.date)), datasets:[{label:`${type}${unit?' ('+unit+')':''}`, data:arr.map(t=>Number(t.value)), borderColor:getComputedStyle(document.documentElement).getPropertyValue('--red'), backgroundColor:'rgba(200,16,46,0.15)', fill:true, tension:.3, pointRadius:4, pointBackgroundColor:'#fff'}] },
       options: chartOpts()
     });
