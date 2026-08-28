@@ -217,6 +217,17 @@ body::before{
 .plan-exercise-desc{font-size:12.5px; color:var(--ink-dim); margin-top:3px; line-height:1.4;}
 .plan-exercise-note{font-size:12px; color:var(--ink-dim); font-style:italic; margin-top:5px;}
 .video-link{display:inline-flex; align-items:center; gap:6px; margin-top:8px; padding:6px 13px; background:var(--bg-raise); border:1.5px solid var(--red); border-radius:20px; font-size:12.5px; font-weight:700; color:var(--red); text-decoration:none; transition:all .15s; -webkit-tap-highlight-color:transparent;}
+.yt-embed-wrap{position:relative; width:100%; height:100%;}
+.yt-custom-controls{
+  position:absolute; bottom:8px; right:8px; display:flex; gap:6px; z-index:5;
+  opacity:0; pointer-events:none; transition:opacity .2s;
+}
+.yt-custom-controls.visible{ opacity:1; pointer-events:auto; }
+.yt-custom-controls button{
+  width:30px; height:30px; border-radius:50%; border:none; cursor:pointer;
+  background:rgba(0,0,0,0.6); color:var(--white); font-size:13px;
+  display:flex; align-items:center; justify-content:center;
+}
 .video-link:hover, .video-link:active{background:var(--red); color:var(--white);}
 .individual-plan-card{border:2px solid var(--red); border-radius:16px; padding:18px; background:rgba(200,16,46,0.07); margin-bottom:18px;}
 .individual-plan-badge{display:inline-block; background:var(--red); color:var(--white); font-size:10px; text-transform:uppercase; letter-spacing:0.6px; padding:4px 11px; border-radius:20px; font-weight:700; margin-bottom:10px;}
@@ -2142,7 +2153,7 @@ function setupFloatingBackButton(){
   if(!btn) return;
   btn.addEventListener('click', ()=>{ if(currentBackAction) currentBackAction(); });
   const updateVisibility = ()=>{
-    const scrolled = window.scrollY > 160;
+    const scrolled = window.scrollY > 90;
     btn.style.display = (scrolled && currentBackAction) ? 'block' : 'none';
   };
   window.addEventListener('scroll', updateVisibility, {passive:true});
@@ -4439,12 +4450,66 @@ function driveEmbedUrl(url){
 function mediaEmbedHTML(url, label){
   if(!url) return `<div class="empty-state" style="height:100%; display:flex; align-items:center; justify-content:center;">Sin ${label||'contenido'} cargado</div>`;
   const yt = youtubeEmbedUrl(url);
-  if(yt) return `<iframe src="${yt}" style="width:100%; height:100%; border:0;" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`;
+  if(yt){
+    const wid = 'yt'+uid();
+    // controls=0 saca los controles nativos grandes de YouTube (los que tapaban el video).
+    // enablejsapi=1 nos deja mandarle comandos chiquitos propios (play/pausa/mute) desde afuera.
+    return `<div class="yt-embed-wrap" data-yt-wrap="${wid}">
+      <iframe id="${wid}" src="${yt}${yt.includes('?')?'&':'?'}controls=0&enablejsapi=1&playsinline=1&rel=0&modestbranding=1" style="width:100%; height:100%; border:0;" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+      <div class="yt-custom-controls" data-yt-controls="${wid}">
+        <button type="button" data-yt-cmd="playpause" data-yt-target="${wid}">⏯</button>
+        <button type="button" data-yt-cmd="mute" data-yt-target="${wid}">🔇</button>
+      </div>
+    </div>`;
+  }
   const drive = driveEmbedUrl(url);
   if(drive) return `<iframe src="${drive}" style="width:100%; height:100%; border:0;" allow="autoplay" allowfullscreen></iframe>`;
   if(/\.(jpg|jpeg|png|gif|webp)(\?.*)?$/i.test(url)) return `<img src="${url}" style="width:100%; height:100%; object-fit:contain; background:#000;">`;
   // No reconocemos el formato del link: lo dejamos como acceso directo, mejor que no mostrar nada.
   return `<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:#000;"><a href="${url}" target="_blank" rel="noopener" class="video-link">▶ Abrir enlace</a></div>`;
+}
+/* Arma y conecta los controles chiquitos propios de cada video de YouTube embebido en la
+   pantalla actual (se llama después de insertar el HTML en el DOM). Usa el protocolo de
+   mensajes que el reproductor incrustado de YouTube escucha, sin necesidad de cargar toda
+   su librería — funciona con un mensaje simple, mismo resultado. */
+function wireYoutubeCustomControls(){
+  document.querySelectorAll('[data-yt-wrap]').forEach(wrap=>{
+    const wid = wrap.dataset.ytWrap;
+    const controls = wrap.querySelector(`[data-yt-controls="${wid}"]`);
+    if(!controls || wrap.dataset.ytWired) return;
+    wrap.dataset.ytWired = '1';
+    let hideTimer = null;
+    const showControls = ()=>{
+      controls.classList.add('visible');
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(()=>controls.classList.remove('visible'), 2200);
+    };
+    wrap.addEventListener('click', (e)=>{
+      if(e.target.closest('[data-yt-cmd]')) return; // el click en un botón no debe re-disparar el show/hide
+      showControls();
+    });
+    controls.querySelectorAll('[data-yt-cmd]').forEach(btn=>{
+      btn.addEventListener('click', (e)=>{
+        e.stopPropagation();
+        const iframe = document.getElementById(btn.dataset.ytTarget);
+        if(!iframe || !iframe.contentWindow) return;
+        const send = (func)=>iframe.contentWindow.postMessage(JSON.stringify({event:'command', func, args:[]}), '*');
+        if(btn.dataset.ytCmd==='playpause'){
+          // No sabemos con certeza si está en pausa o reproduciendo desde afuera sin la librería
+          // completa, así que alternamos: mandamos "play"; si ya estaba reproduciendo, YouTube
+          // simplemente lo deja igual, y el siguiente toque manda "pause".
+          btn.dataset.ytState = btn.dataset.ytState==='playing' ? 'paused' : 'playing';
+          send(btn.dataset.ytState==='playing' ? 'playVideo' : 'pauseVideo');
+        } else if(btn.dataset.ytCmd==='mute'){
+          btn.dataset.ytMuted = btn.dataset.ytMuted==='1' ? '' : '1';
+          send(btn.dataset.ytMuted==='1' ? 'mute' : 'unMute');
+          btn.textContent = btn.dataset.ytMuted==='1' ? '🔈' : '🔇';
+        }
+        showControls();
+      });
+    });
+    showControls(); // se ven un instante al cargar, así se sabe que están ahí, y después se ocultan solos
+  });
 }
 let activeHoverPreview = null;
 function wireVideoHoverPreview(){
@@ -5274,6 +5339,7 @@ function afterRender(){
         ofdCompareA = null; ofdCompareB = null;
         toast('Evaluación eliminada'); render();
       }));
+      wireYoutubeCustomControls();
     }
   }
   if(currentView==='my-tests'){ drawProfileCharts(SESSION.playerId); }
@@ -5525,7 +5591,11 @@ function afterRender(){
       render();
     }));
     const backTodayBtn = document.getElementById('btn-back-today');
-    if(backTodayBtn) backTodayBtn.addEventListener('click', ()=>{ wellnessTargetDate = todayStr(); wellnessForceEdit = null; render(); });
+    if(backTodayBtn){
+      const backTodayFn = ()=>{ wellnessTargetDate = todayStr(); wellnessForceEdit = null; render(); };
+      backTodayBtn.addEventListener('click', backTodayFn);
+      currentBackAction = backTodayFn;
+    }
     const editPreBtn = document.getElementById('btn-edit-pre');
     if(editPreBtn) editPreBtn.addEventListener('click', ()=>{ wellnessForceEdit='pre'; render(); });
     const editPostBtn = document.getElementById('btn-edit-post');
