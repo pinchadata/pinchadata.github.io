@@ -2029,6 +2029,7 @@ function showApp(){
   applyTheme();
   setupSwipeNav();
   setupFloatingBackButton();
+  setupYoutubeAutoLoop();
   maybeShowInstallBanner();
   navigate(SESSION.role==='pf' ? 'dashboard' : 'wellness');
   showWelcomeModal();
@@ -2374,6 +2375,48 @@ function wellnessValSpan(type, value, text){
   return c ? `<span style="color:${c}; font-weight:700;">${text}</span>` : text;
 }
 let currentBackAction = null;
+let youtubeAutoLoopInitialized = false;
+function wireYoutubeIframes(){
+  document.querySelectorAll('[data-yt-loop]').forEach(iframe=>{
+    if(iframe.dataset.ytWired) return;
+    iframe.dataset.ytWired = '1';
+    iframe.addEventListener('load', ()=>{
+      // Este "saludo" es lo que la API de mensajes de YouTube necesita recibir para empezar
+      // a avisarnos sus eventos (que está listo, que terminó, etc.) — sin esto, no manda nada.
+      iframe.contentWindow.postMessage(JSON.stringify({event:'listening', id: iframe.id}), '*');
+    });
+  });
+}
+function setupYoutubeAutoLoop(){
+  if(youtubeAutoLoopInitialized) return;
+  youtubeAutoLoopInitialized = true;
+  window.addEventListener('message', (event)=>{
+    if(typeof event.data !== 'string') return;
+    let data;
+    try{ data = JSON.parse(event.data); }catch(e){ return; }
+    document.querySelectorAll('[data-yt-loop]').forEach(iframe=>{
+      if(iframe.contentWindow !== event.source) return;
+      const send = (func, args)=>iframe.contentWindow.postMessage(JSON.stringify({event:'command', func, args:args||[]}), '*');
+      // Apenas el reproductor avisa que está listo (onReady), arrancamos el video nosotros
+      // mismos por mensaje (en vez de usar autoplay=1 en la URL, que es lo que parece disparar
+      // los controles de reproducción del sistema operativo/navegador).
+      if(data.event==='onReady' && iframe.dataset.ytAutoplay==='1'){
+        iframe.dataset.ytAutoplay = '0';
+        send('playVideo');
+        return;
+      }
+      // YouTube manda distintas formas de mensaje según la versión del reproductor; cubrimos
+      // las dos formas más comunes de avisar "el video terminó" (código de estado 0), para
+      // reiniciarlo desde cero apenas termina, sin mostrar ninguna pantalla de por medio.
+      const ended = data.event==='onStateChange' && data.info===0;
+      const endedAlt = data.event==='infoDelivery' && data.info && data.info.playerState===0;
+      if(ended || endedAlt){
+        send('seekTo', [0, true]);
+        send('playVideo');
+      }
+    });
+  });
+}
 let ofdSelectedPlayer = null;
 let ofdCompareA = null;
 let ofdCompareB = null;
@@ -4466,11 +4509,13 @@ function mediaEmbedHTML(url, label){
   if(!url) return `<div class="empty-state" style="height:100%; display:flex; align-items:center; justify-content:center;">Sin ${label||'contenido'} cargado</div>`;
   const ytId = youtubeVideoId(url);
   if(ytId){
-    // autoplay + loop (con playlist=el mismo ID, truco necesario para que YouTube repita UN
-    // solo video en bucle) + mute (el navegador exige silencio para autorreproducir solo) +
-    // controls=0: el video arranca solo, nunca se detiene, y no hace falta ningún botón encima.
-    const src = `https://www.youtube.com/embed/${ytId}?autoplay=1&mute=1&loop=1&playlist=${ytId}&controls=0&playsinline=1&rel=0&modestbranding=1`;
-    return `<iframe src="${src}" style="width:100%; height:100%; border:0; pointer-events:none;" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`;
+    const wid = 'yt'+uid();
+    // OJO: no ponemos autoplay=1 en la URL — eso es lo que parece disparar los controles de
+    // reproducción del sistema operativo/navegador (los mismos de la pantalla de bloqueo).
+    // En cambio, arrancamos el video nosotros mismos por mensaje una vez que carga, lo que a
+    // veces evita que el navegador lo registre como "reproducción automática".
+    const src = `https://www.youtube.com/embed/${ytId}?mute=1&controls=0&enablejsapi=1&playsinline=1&rel=0&modestbranding=1&iv_load_policy=3&disablekb=1`;
+    return `<iframe id="${wid}" data-yt-loop="${wid}" data-yt-autoplay="1" src="${src}" style="width:100%; height:100%; border:0; pointer-events:none;" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`;
   }
   const drive = driveEmbedUrl(url);
   if(drive) return `<iframe src="${drive}" style="width:100%; height:100%; border:0;" allow="autoplay" allowfullscreen></iframe>`;
@@ -5311,6 +5356,7 @@ function afterRender(){
         toast('Evaluación eliminada'); render();
       }));
     }
+    wireYoutubeIframes();
   }
   if(currentView==='my-tests'){ drawProfileCharts(SESSION.playerId); }
   if(currentView==='my-injury'){
