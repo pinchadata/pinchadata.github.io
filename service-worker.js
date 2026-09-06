@@ -1,34 +1,51 @@
-// service-worker.js - Pincha Data
+// ============================================================
+// Service Worker — Pincha Data
+// ============================================================
+// IMPORTANTE (léase antes de tocar este archivo):
+// Este service worker NO guarda en caché el archivo principal de la app
+// (index.html) ni ningún otro recurso de la página. A propósito.
 //
-// Este archivo permite que las notificaciones se muestren en la bandeja
-// del sistema operativo (junto a WhatsApp, Instagram, etc.) en vez de
-// quedar encerradas dentro de la pestana del navegador.
+// Por qué: tuvimos varios problemas donde el celular seguía mostrando
+// una versión vieja de la app después de subir una actualización nueva,
+// obligando a desinstalar y reinstalar la app para que se vea el cambio.
+// La causa: los service workers, por diseño, pueden quedarse "pegados"
+// sirviendo contenido guardado de antes, y el navegador no siempre se
+// da cuenta de que hay contenido nuevo esperando.
 //
-// IMPORTANTE: subi este archivo a la MISMA carpeta que index.html en tu
-// hosting. Si no esta en el mismo lugar, la app va a seguir funcionando
-// pero sin notificaciones a nivel sistema (solo la campanita interna).
+// La solución más simple y confiable: este service worker se limita
+// pura y exclusivamente a manejar las notificaciones push. Para todo
+// lo demás, deja pasar el pedido directo a internet, sin interceptarlo
+// ni guardar nada — así el celular siempre trae la versión más nueva
+// de la app cada vez que se abre, sin necesidad de reinstalar nunca.
+// ============================================================
 
-importScripts('https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js');
-importScripts('https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js');
-
-firebase.initializeApp({
+const firebaseConfig = {
   apiKey: "AIzaSyBxcxTN2PMGZEdhj1tJcyptwRX86yg2E1w",
   authDomain: "pincha-data.firebaseapp.com",
   projectId: "pincha-data",
   storageBucket: "pincha-data.firebasestorage.app",
   messagingSenderId: "1037476088393",
   appId: "1:1037476088393:web:0ba7365440eef06c764d98"
+};
+
+importScripts('https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js');
+firebase.initializeApp(firebaseConfig);
+
+// skipWaiting + clients.claim: apenas se detecta una versión nueva de ESTE archivo,
+// toma el control de inmediato, sin esperar a que se cierren todas las pestañas abiertas.
+self.addEventListener('install', (event) => {
+  self.skipWaiting();
+});
+self.addEventListener('activate', (event) => {
+  event.waitUntil(self.clients.claim());
 });
 
-const messaging = firebase.messaging();
+// A propósito: NO hay ningún listener de 'fetch' acá. Eso significa que este service
+// worker no intercepta ni guarda en caché ninguna otra parte de la app — todo pedido
+// (el HTML, el CSS, el JS) va directo a internet como si no hubiera service worker
+// de por medio para esos casos. Solo nos ocupamos de lo nuestro: las notificaciones push.
 
-// IMPORTANTE: no usamos messaging.onBackgroundMessage() acá a propósito.
-// Ese mecanismo depende de que el navegador reconozca automáticamente el
-// mensaje como "de tipo notificación" — y eso varía entre navegadores y
-// celulares, a veces con demora o directamente sin mostrarse. En cambio,
-// escuchamos el evento nativo 'push' del navegador, que SIEMPRE se dispara
-// apenas llega el mensaje (esté la app abierta, cerrada o en segundo plano),
-// sin depender de ninguna interpretación automática de Firebase.
 self.addEventListener('push', function (event) {
   let payload = {};
   try { payload = event.data ? event.data.json() : {}; } catch (e) { /* payload no era JSON */ }
@@ -44,26 +61,14 @@ self.addEventListener('push', function (event) {
   event.waitUntil(self.registration.showNotification(title, options));
 });
 
-self.addEventListener('install', function () {
-  self.skipWaiting();
-});
-
-self.addEventListener('activate', function (event) {
-  event.waitUntil(self.clients.claim());
-});
-
-// Al tocar la notificacion, lleva a la app (o la abre si estaba cerrada)
 self.addEventListener('notificationclick', function (event) {
   event.notification.close();
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (clientsArr) {
-      var i;
-      for (i = 0; i < clientsArr.length; i++) {
-        if (clientsArr[i].url.indexOf(self.registration.scope) !== -1) {
-          return clientsArr[i].focus();
-        }
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ('focus' in client) return client.focus();
       }
-      return self.clients.openWindow('./');
+      if (clients.openWindow) return clients.openWindow('./');
     })
   );
 });

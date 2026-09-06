@@ -1866,8 +1866,14 @@ function showLoginCard(id){
   });
 }
 function wireLoginHandlers(){
-  document.getElementById('goto-register-player').onclick = ()=>{
+  document.getElementById('goto-register-player').onclick = async ()=>{
     const sel = document.getElementById('reg-player-select');
+    if(!initialLoadComplete){
+      sel.innerHTML = '<option value="">Cargando perfiles...</option>';
+      showLoginCard('login-card-register-player');
+      const start = Date.now();
+      while(!initialLoadComplete && (Date.now()-start) < 15000){ await new Promise(r=>setTimeout(r, 200)); }
+    }
     const available = STATE.players.filter(p=>!STATE.accounts.some(a=>a.playerId===p.id));
     sel.innerHTML = available.length ? available.map(p=>`<option value="${p.id}">${p.name}</option>`).join('') : '<option value="">No hay perfiles disponibles — hablá con tu PF</option>';
     document.getElementById('reg-player-category-box').innerHTML = categoryCheckboxesHTML('regcat', []);
@@ -1886,9 +1892,26 @@ function wireLoginHandlers(){
   document.getElementById('login-form').onsubmit = async (ev)=>{
     ev.preventDefault();
     const errBox = document.getElementById('login-error');
+    const submitBtn = document.getElementById('login-submit');
     const username = document.getElementById('login-username').value.trim().toLowerCase();
     const password = document.getElementById('login-password').value;
     if(!username || !password){ errBox.textContent='Completá usuario y contraseña.'; errBox.style.display='block'; return; }
+    // Si la app todavía está trayendo los datos de la base (recién se abrió), esperamos acá
+    // en vez de decir "no existe ese usuario" — ese mensaje era incorrecto: el usuario sí
+    // existe, lo que pasa es que la lista de cuentas todavía no había terminado de cargar.
+    if(!initialLoadComplete){
+      errBox.textContent = 'Cargando datos, un momento...'; errBox.style.display='block';
+      if(submitBtn){ submitBtn.disabled = true; }
+      const start = Date.now();
+      while(!initialLoadComplete && (Date.now()-start) < 15000){
+        await new Promise(r=>setTimeout(r, 200));
+      }
+      if(submitBtn){ submitBtn.disabled = false; }
+      if(!initialLoadComplete){
+        errBox.textContent = 'La conexión está tardando demasiado. Revisá tu internet y tocá "Ingresar" de nuevo.';
+        return;
+      }
+    }
     if(anyStorageFailed()){
       errBox.textContent='No se pudo conectar con la base de datos. Revisá tu conexión y tocá "Ingresar" de nuevo.'; errBox.style.display='block';
       failedStorageKeys.clear();
@@ -1896,7 +1919,10 @@ function wireLoginHandlers(){
       if(anyStorageFailed()){ return; }
     }
     const acc = STATE.accounts.find(a=>a.username===username);
-    if(!acc){ errBox.textContent='No existe ese usuario.'; errBox.style.display='block'; return; }
+    if(!acc){
+      errBox.innerHTML = `No existe ese usuario.<br><span style="font-size:10.5px; opacity:0.7;">Diagnóstico: ${STATE.accounts.length} cuenta(s) cargada(s), carga inicial ${initialLoadComplete?'completa':'incompleta'}, conexión ${firebaseReady?'OK':'sin Firebase'}. Sacale una foto a esto y mandásela a Lautaro/soporte.</span>`;
+      errBox.style.display='block'; return;
+    }
     const hash = await hashPassword(password);
     if(hash !== acc.passwordHash){ errBox.textContent='Contraseña incorrecta.'; errBox.style.display='block'; return; }
     errBox.style.display='none';
@@ -1905,6 +1931,9 @@ function wireLoginHandlers(){
   document.getElementById('reg-player-form').onsubmit = async (ev)=>{
     ev.preventDefault();
     const errBox = document.getElementById('reg-player-error');
+    if(!initialLoadComplete){
+      errBox.textContent='Cargando datos, esperá un momento y volvé a tocar el botón.'; errBox.style.display='block'; return;
+    }
     const pid = document.getElementById('reg-player-select').value;
     const categories = getCheckedCategories('regcat');
     const username = document.getElementById('reg-player-username').value.trim().toLowerCase();
@@ -1926,6 +1955,9 @@ function wireLoginHandlers(){
   document.getElementById('reg-staff-form').onsubmit = async (ev)=>{
     ev.preventDefault();
     const errBox = document.getElementById('reg-staff-error');
+    if(!initialLoadComplete){
+      errBox.textContent='Cargando datos, esperá un momento y volvé a tocar el botón.'; errBox.style.display='block'; return;
+    }
     const name = document.getElementById('reg-staff-name').value.trim();
     const username = document.getElementById('reg-staff-username').value.trim().toLowerCase();
     const pw = document.getElementById('reg-staff-password').value;
@@ -2015,6 +2047,7 @@ function showApp(){
   buildSidebarNav();
   buildBottomNav();
   document.getElementById('btn-logout').onclick = logout;
+  registerAppServiceWorker(); // para cualquier rol: así la app siempre chequea actualizaciones al entrar
   document.getElementById('notif-bell').style.display = SESSION.role==='jugadora' ? 'inline-flex' : 'none';
   if(SESSION.role==='jugadora'){ document.getElementById('notif-bell').onclick = openNotifModal; refreshNotifBell(); requestNotifPermissionOnce(); startNotifPolling(); }
   const refreshBtn = document.getElementById('btn-refresh-data');
@@ -2029,7 +2062,7 @@ function showApp(){
   applyTheme();
   setupSwipeNav();
   setupFloatingBackButton();
-  setupYoutubeAutoLoop();
+  loadYoutubeApiOnce();
   maybeShowInstallBanner();
   navigate(SESSION.role==='pf' ? 'dashboard' : 'wellness');
   showWelcomeModal();
@@ -2375,44 +2408,38 @@ function wellnessValSpan(type, value, text){
   return c ? `<span style="color:${c}; font-weight:700;">${text}</span>` : text;
 }
 let currentBackAction = null;
-let youtubeAutoLoopInitialized = false;
-function wireYoutubeIframes(){
-  document.querySelectorAll('[data-yt-loop]').forEach(iframe=>{
-    if(iframe.dataset.ytWired) return;
-    iframe.dataset.ytWired = '1';
-    iframe.addEventListener('load', ()=>{
-      // Este "saludo" es lo que la API de mensajes de YouTube necesita recibir para empezar
-      // a avisarnos sus eventos (que está listo, que terminó, etc.) — sin esto, no manda nada.
-      iframe.contentWindow.postMessage(JSON.stringify({event:'listening', id: iframe.id}), '*');
-    });
-  });
+let youtubeApiLoading = false;
+let youtubeApiReady = false;
+const ytPlayerInstances = {};
+function loadYoutubeApiOnce(){
+  if(youtubeApiLoading || youtubeApiReady) return;
+  youtubeApiLoading = true;
+  // Esta es la librería OFICIAL de YouTube para controlar el reproductor de verdad (play,
+  // pausa, reiniciar) — a diferencia de mandar mensajes "a mano", esto sí funciona siempre.
+  window.onYouTubeIframeAPIReady = function(){ youtubeApiReady = true; wireYoutubeIframes(); };
+  const tag = document.createElement('script');
+  tag.src = 'https://www.youtube.com/iframe_api';
+  document.head.appendChild(tag);
 }
-function setupYoutubeAutoLoop(){
-  if(youtubeAutoLoopInitialized) return;
-  youtubeAutoLoopInitialized = true;
-  window.addEventListener('message', (event)=>{
-    if(typeof event.data !== 'string') return;
-    let data;
-    try{ data = JSON.parse(event.data); }catch(e){ return; }
-    document.querySelectorAll('[data-yt-loop]').forEach(iframe=>{
-      if(iframe.contentWindow !== event.source) return;
-      const send = (func, args)=>iframe.contentWindow.postMessage(JSON.stringify({event:'command', func, args:args||[]}), '*');
-      // Apenas el reproductor avisa que está listo (onReady), arrancamos el video nosotros
-      // mismos por mensaje (en vez de usar autoplay=1 en la URL, que es lo que parece disparar
-      // los controles de reproducción del sistema operativo/navegador).
-      if(data.event==='onReady' && iframe.dataset.ytAutoplay==='1'){
-        iframe.dataset.ytAutoplay = '0';
-        send('playVideo');
-        return;
-      }
-      // YouTube manda distintas formas de mensaje según la versión del reproductor; cubrimos
-      // las dos formas más comunes de avisar "el video terminó" (código de estado 0), para
-      // reiniciarlo desde cero apenas termina, sin mostrar ninguna pantalla de por medio.
-      const ended = data.event==='onStateChange' && data.info===0;
-      const endedAlt = data.event==='infoDelivery' && data.info && data.info.playerState===0;
-      if(ended || endedAlt){
-        send('seekTo', [0, true]);
-        send('playVideo');
+function wireYoutubeIframes(){
+  if(!youtubeApiReady){ loadYoutubeApiOnce(); return; }
+  document.querySelectorAll('[data-yt-pending]').forEach(placeholder=>{
+    const wid = placeholder.id;
+    const videoId = placeholder.dataset.ytPending;
+    if(ytPlayerInstances[wid]) return; // ya se creó el reproductor acá, no lo dupliquemos
+    ytPlayerInstances[wid] = new YT.Player(wid, {
+      videoId,
+      playerVars: {
+        controls: 0, mute: 1, playsinline: 1, rel: 0, modestbranding: 1,
+        iv_load_policy: 3, disablekb: 1, fs: 0
+      },
+      events: {
+        onReady: (e)=>{ e.target.mute(); e.target.playVideo(); },
+        onStateChange: (e)=>{
+          // Cuando el video termina (estado 0), lo reiniciamos desde cero al toque —
+          // así nunca se llega a ver ninguna pantalla intermedia de "fin de video".
+          if(e.data===0){ e.target.seekTo(0); e.target.playVideo(); }
+        }
       }
     });
   });
@@ -4510,12 +4537,10 @@ function mediaEmbedHTML(url, label){
   const ytId = youtubeVideoId(url);
   if(ytId){
     const wid = 'yt'+uid();
-    // OJO: no ponemos autoplay=1 en la URL — eso es lo que parece disparar los controles de
-    // reproducción del sistema operativo/navegador (los mismos de la pantalla de bloqueo).
-    // En cambio, arrancamos el video nosotros mismos por mensaje una vez que carga, lo que a
-    // veces evita que el navegador lo registre como "reproducción automática".
-    const src = `https://www.youtube.com/embed/${ytId}?mute=1&controls=0&enablejsapi=1&playsinline=1&rel=0&modestbranding=1&iv_load_policy=3&disablekb=1`;
-    return `<iframe id="${wid}" data-yt-loop="${wid}" data-yt-autoplay="1" src="${src}" style="width:100%; height:100%; border:0; pointer-events:none;" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`;
+    // Dejamos un espacio vacío con este ID — la librería oficial de YouTube (que cargamos
+    // aparte) va a crear el reproductor de verdad ahí adentro, con control real de play/pausa/
+    // reinicio. Los intentos anteriores con mensajes "caseros" no lograban controlarlo bien.
+    return `<div id="${wid}" data-yt-pending="${ytId}" style="width:100%; height:100%; background:#000;"></div>`;
   }
   const drive = driveEmbedUrl(url);
   if(drive) return `<iframe src="${drive}" style="width:100%; height:100%; border:0;" allow="autoplay" allowfullscreen></iframe>`;
@@ -4835,6 +4860,21 @@ async function registerAppServiceWorker(){
   if(!('serviceWorker' in navigator)) return null;
   try{
     swRegistration = await navigator.serviceWorker.register('./service-worker.js');
+    // Forzamos que revise ahora mismo si hay una versión nueva del service worker
+    // (en vez de esperar a que el navegador lo chequee solo, en su propio tiempo).
+    swRegistration.update().catch(()=>{});
+    // Si en algún momento una versión nueva toma el control (reemplazando a la que
+    // estaba activa), recargamos la página sola una vez — así nadie tiene que
+    // desinstalar/reinstalar la app para ver las actualizaciones.
+    if(!window.__swReloadWired){
+      window.__swReloadWired = true;
+      let refreshing = false;
+      navigator.serviceWorker.addEventListener('controllerchange', ()=>{
+        if(refreshing) return;
+        refreshing = true;
+        location.reload();
+      });
+    }
     return swRegistration;
   }catch(e){ return null; }
 }
@@ -5706,6 +5746,7 @@ function afterRender(){
 
 /* =============================== INIT =============================== */
 let appBooted = false;
+let initialLoadComplete = false;
 window.addEventListener('error', function(ev){
   try{
     console.error('Error capturado:', ev.message, ev.filename, ev.lineno);
@@ -5745,6 +5786,7 @@ try{ wireLoginHandlers(); }catch(e){ console.error('No se pudieron preparar los 
   try{
     await initFirebase();
     await loadAll();
+    initialLoadComplete = true;
     const session = await storageGet('session', false);
     const sessionLooksValid = session && session.role && session.accountId;
     let accountStillExists = sessionLooksValid && STATE.accounts.some(a=>a.id===session.accountId);
@@ -5777,6 +5819,7 @@ try{ wireLoginHandlers(); }catch(e){ console.error('No se pudieron preparar los 
     }
   }catch(e){
     console.error('Error crítico al iniciar la app', e);
+    initialLoadComplete = true;
     document.getElementById('app').style.display='none';
     document.getElementById('login-screen').style.display='flex';
     try{ showLoginCard('login-card-login'); }catch(_){}
