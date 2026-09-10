@@ -4,6 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 <title>PINCHA DATA — Estudiantes de La Plata Handball Femenino</title>
+<!-- Le avisamos al navegador desde ya que vamos a necesitar conectarnos a estos servidores,
+     para que empiece a resolver la conexión (DNS + certificado seguro) en paralelo mientras
+     carga el resto de la página, en vez de recién empezar cuando el código se lo pida. Esto
+     ayuda sobre todo en redes de datos móviles, donde ese primer contacto suele tardar más. -->
+<link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+<link rel="dns-prefetch" href="https://www.gstatic.com">
+<link rel="dns-prefetch" href="https://firestore.googleapis.com">
+<link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
 <!-- PWA / Add to Home Screen -->
 <link rel="manifest" href="data:application/manifest+json;base64,eyJuYW1lIjogIlBpbmNoYSBEYXRhIC0gSGFuZGJhbGwgRmVtZW5pbm8iLCAic2hvcnRfbmFtZSI6ICJQaW5jaGEgRGF0YSIsICJkZXNjcmlwdGlvbiI6ICJHZXN0aVx1MDBmM24gZGUgcmVuZGltaWVudG8sIHdlbGxuZXNzIHkgbGVzaW9uZXMgZGVsIGhhbmRiYWxsIGZlbWVuaW5vIGRlIEVzdHVkaWFudGVzIGRlIExhIFBsYXRhIiwgInN0YXJ0X3VybCI6ICIuIiwgImRpc3BsYXkiOiAic3RhbmRhbG9uZSIsICJiYWNrZ3JvdW5kX2NvbG9yIjogIiMxMDExMTAiLCAidGhlbWVfY29sb3IiOiAiI2M4MTAyZSIsICJvcmllbnRhdGlvbiI6ICJwb3J0cmFpdC1wcmltYXJ5IiwgImljb25zIjogW3sic3JjIjogImRhdGE6aW1hZ2Uvc3ZnK3htbDtiYXNlNjQsUEhOMlp5QjRiV3h1Y3owaWFIUjBjRG92TDNkM2R5NTNNeTV2Y21jdk1qQXdNQzl6ZG1jaUlIWnBaWGRDYjNnOUlqQWdNQ0ExTVRJZ05URXlJajQ4Y21WamRDQjNhV1IwYUQwaU5URXlJaUJvWldsbmFIUTlJalV4TWlJZ1ptbHNiRDBpSXpFd01URXhNQ0l2UGp4d2IyeDVaMjl1SUhCdmFXNTBjejBpTUN3d0lEVXhNaXd3SURVeE1pdzFNVElpSUdacGJHdzlJaU5qT0RFd01tVWlMejQ4Y0c5c2VXZHZiaUJ3YjJsdWRITTlJakFzTUNBd0xEVXhNaUExTVRJc05URXlJaUJtYVd4c1BTSWpaalJtTW1WaElpOCtQR05wY21Oc1pTQmplRDBpTWpVMklpQmplVDBpTWpVMklpQnlQU0l4T0RBaUlHWnBiR3c5SW01dmJtVWlJSE4wY205clpUMGlJMlkwWmpKbFlTSWdjM1J5YjJ0bExYZHBaSFJvUFNJeE1DSXZQand2YzNablBnPT0iLCAic2l6ZXMiOiAiNTEyeDUxMiIsICJ0eXBlIjogImltYWdlL3N2Zyt4bWwiLCAicHVycG9zZSI6ICJhbnkgbWFza2FibGUifV19">
 <meta name="theme-color" content="#101110">
@@ -991,14 +1001,20 @@ async function loadFirebaseSdk(){
 async function initFirebase(){
   if(!firebaseConfig.apiKey || firebaseConfig.apiKey === 'TU_API_KEY'){ firebaseReady=false; return; }
   try{
-    const loaded = await withTimeout(loadFirebaseSdk(), 12000, 'carga del SDK de Firebase');
+    // OJO: este límite tiene que ser MAYOR que lo que loadFirebaseSdk() puede llegar a
+    // necesitar por dentro en el peor caso (son 4 piezas, cada una con hasta 2 intentos de
+    // 6 segundos = 48 segundos posibles). Antes este límite exterior era de solo 12 segundos,
+    // más corto que el peor caso interno — en wifi de compu (rápido) nunca se notaba, pero en
+    // datos móviles (más lentos) cortaba la carga de Firebase antes de tiempo, tirando todo a
+    // "modo local" sin usuarios. Por eso el problema parecía exclusivo de celular.
+    const loaded = await withTimeout(loadFirebaseSdk(), 55000, 'carga del SDK de Firebase');
     if(!loaded || typeof firebase === 'undefined'){
       console.error('El SDK de Firebase no está disponible (posible bloqueador de contenido, extensión de privacidad, o red restringida). Se usa almacenamiento local en este dispositivo.');
       firebaseReady = false; return;
     }
     firebase.initializeApp(firebaseConfig);
     fbDb = firebase.firestore();
-    await withTimeout(firebase.auth().signInAnonymously(), 15000, 'inicio de sesión anónimo de Firebase');
+    await withTimeout(firebase.auth().signInAnonymously(), 20000, 'inicio de sesión anónimo de Firebase');
     firebaseReady = true;
   }catch(e){ console.error('No se pudo iniciar Firebase, se usa almacenamiento local', e); firebaseReady=false; }
 }
@@ -1092,38 +1108,51 @@ async function loadCollectionWithMigration(name, legacyKey){
   return [];
 }
 
-async function loadAll(){
-  // Antes estas 9 lecturas salían todas juntas (Promise.all) apenas se entraba a la app —
-  // eso satura la conexión justo en el momento más sensible (el primer ingreso) y es la causa
-  // más probable de los "error de conexión" al querer entrar. Ahora van una por una: el
-  // ingreso puede tardar un poco más, pero es mucho más confiable, sobre todo en celular.
-  const players = await storageGet('players', true);
-  const tests = await storageGet('tests', true);
-  const injuries = await storageGet('injuries', true);
-  const events = await storageGet('events', true);
-  const exercises = await storageGet('exercises', true);
-  const plans = await storageGet('plans', true);
-  const maxLifts = await storageGet('maxlifts', true);
-  const individualPlans = await storageGet('individualplans', true);
-  const testBenchmarks = await storageGet('testbenchmarks', true);
-  const wellness = await loadCollectionWithMigration('wellness', 'wellness');
+// Para poder ingresar a la app solo hace falta la lista de usuarios (accounts) — nada más.
+// Antes se esperaba a cargar TODO (testeos, lesiones, calendario, ejercicios, planes...) antes
+// de dejar ni siquiera intentar el login, lo cual hacía que el ingreso pareciera lentísimo sin
+// necesidad. Ahora traemos primero SOLO esto, y todo lo demás sigue cargando de fondo después,
+// sin bloquear el ingreso.
+async function loadAccountsFirst(){
   const accounts = await loadCollectionWithMigration('accounts', 'accounts');
-  const notifications = await loadCollectionWithMigration('notifications', 'notifications');
-  const pushTokens = await collectionGetAll('pushTokens');
-  const ofdMedia = await collectionGetAll('ofdMedia');
+  STATE.accounts = accounts || [];
+}
+async function loadRestOfData(){
+  // Primero lo esencial para que el Wellness funcione bien apenas entra una jugadora:
+  // sus datos de jugadora, el calendario (para saber si hay entrenamiento hoy), y sus
+  // wellness ya cargados antes (para no pedirle de nuevo algo que ya completó). El resto
+  // de los datos (más orientados al PF: testeos, ejercicios, planes, etc.) se cargan después,
+  // ya sin apuro.
+  const players = await storageGet('players', true);
+  const events = await storageGet('events', true);
+  const wellness = await loadCollectionWithMigration('wellness', 'wellness');
   STATE.players = players || seedPlayers();
   let playersChanged = migratePositions();
   if(migrateCategories()) playersChanged = true;
   if(migratePositionsMulti()) playersChanged = true;
   if(playersChanged) await safeSaveCollection('players', STATE.players, 'jugadoras');
+  STATE.events = events || seedEvents();
+  STATE.wellness = wellness || seedWellness(STATE.players);
+  wellnessDataReady = true;
+  // Si la jugadora ya estaba parada en la pantalla de Wellness esperando, refrescamos apenas
+  // llega esto — sin esperar a que termine de cargar el resto, que puede tardar más.
+  if(SESSION && document.getElementById('app').style.display!=='none' && currentView==='wellness'){ render(); }
+
+  const tests = await storageGet('tests', true);
+  const injuries = await storageGet('injuries', true);
+  const exercises = await storageGet('exercises', true);
+  const plans = await storageGet('plans', true);
+  const maxLifts = await storageGet('maxlifts', true);
+  const individualPlans = await storageGet('individualplans', true);
+  const testBenchmarks = await storageGet('testbenchmarks', true);
+  const notifications = await loadCollectionWithMigration('notifications', 'notifications');
+  const pushTokens = await collectionGetAll('pushTokens');
+  const ofdMedia = await collectionGetAll('ofdMedia');
   STATE.tests = tests || seedTests(STATE.players);
   STATE.injuries = injuries || seedInjuries(STATE.players);
-  STATE.wellness = wellness || seedWellness(STATE.players);
-  STATE.accounts = accounts || [];
   STATE.notifications = notifications || [];
   STATE.pushTokens = pushTokens || [];
   STATE.ofdMedia = ofdMedia || [];
-  STATE.events = events || seedEvents();
   STATE.exercises = exercises || seedExercises();
   STATE.plans = plans || [];
   STATE.maxLifts = maxLifts || [];
@@ -1154,6 +1183,15 @@ async function loadAll(){
   if(!individualPlans) await safeSaveCollection('individualplans', STATE.individualPlans, 'planes individuales');
   if(!testBenchmarks) await safeSaveCollection('testbenchmarks', STATE.testBenchmarks, 'benchmarks');
   await ensureAnalysisSeed();
+  // Si la persona ya entró a la app mientras el resto de los datos todavía se estaba
+  // trayendo de fondo (gracias a que el login ya no espera a todo esto), actualizamos la
+  // pantalla ahora que ya está todo completo, en vez de dejarla con información a medias.
+  if(SESSION && document.getElementById('app').style.display!=='none'){ renderScoreboard(); render(); }
+}
+async function loadAll(){
+  await loadAccountsFirst();
+  initialLoadComplete = true; // ya se puede intentar ingresar — el resto sigue de fondo
+  await loadRestOfData();
 }
 function topUpExercises(){
   const existingNames = new Set(STATE.exercises.map(e=>e.name.trim().toLowerCase()));
@@ -1872,7 +1910,7 @@ function wireLoginHandlers(){
       sel.innerHTML = '<option value="">Cargando perfiles...</option>';
       showLoginCard('login-card-register-player');
       const start = Date.now();
-      while(!initialLoadComplete && (Date.now()-start) < 15000){ await new Promise(r=>setTimeout(r, 200)); }
+      while(!initialLoadComplete && (Date.now()-start) < 55000){ await new Promise(r=>setTimeout(r, 200)); }
     }
     const available = STATE.players.filter(p=>!STATE.accounts.some(a=>a.playerId===p.id));
     sel.innerHTML = available.length ? available.map(p=>`<option value="${p.id}">${p.name}</option>`).join('') : '<option value="">No hay perfiles disponibles — hablá con tu PF</option>';
@@ -1900,11 +1938,18 @@ function wireLoginHandlers(){
     // en vez de decir "no existe ese usuario" — ese mensaje era incorrecto: el usuario sí
     // existe, lo que pasa es que la lista de cuentas todavía no había terminado de cargar.
     if(!initialLoadComplete){
-      errBox.textContent = 'Cargando datos, un momento...'; errBox.style.display='block';
       if(submitBtn){ submitBtn.disabled = true; }
       const start = Date.now();
-      while(!initialLoadComplete && (Date.now()-start) < 15000){
-        await new Promise(r=>setTimeout(r, 200));
+      // Cargar todo lo necesario de Firebase, en el peor de los casos (con mala señal, donde
+      // el primer servidor no responde y hay que esperar al de respaldo), puede tardar hasta
+      // unos 48 segundos — por eso el margen acá es generoso. Mientras tanto, le mostramos a
+      // la persona los segundos que van pasando, para que quede claro que la app sigue
+      // trabajando y no que se colgó.
+      while(!initialLoadComplete && (Date.now()-start) < 55000){
+        const seg = Math.floor((Date.now()-start)/1000);
+        errBox.textContent = `Cargando datos${seg>3?` (${seg}s, puede tardar en conexiones lentas)`:'...'}`;
+        errBox.style.display='block';
+        await new Promise(r=>setTimeout(r, 300));
       }
       if(submitBtn){ submitBtn.disabled = false; }
       if(!initialLoadComplete){
@@ -5054,6 +5099,12 @@ function updateLoadBadge(){
   badge.textContent = lvl.label; badge.className = 'badge '+lvl.cls;
 }
 function viewWellness(){
+  if(firebaseReady && !wellnessDataReady){
+    return `<div class="card"><div class="empty-state" style="padding:40px 20px; text-align:center;">
+      <div style="font-size:28px; margin-bottom:10px;">⏳</div>
+      Cargando tu wellness...<br><span class="muted" style="font-size:12px;">Un momento, ya casi está.</span>
+    </div></div>`;
+  }
   const p = activePlayer();
   if(!wellnessTargetDate) wellnessTargetDate = todayStr();
   const targetDate = wellnessTargetDate;
@@ -5144,7 +5195,7 @@ function wellnessPreFormHTML(p, targetDate, isToday, entry){
   <div class="card" style="margin-bottom:16px;">
     <h3>¿Cómo llegaste ${isToday?'hoy':`el ${fmtDate(targetDate)}`}, ${p.name.split(' ')[0]}? — ${fmtDate(targetDate)}</h3>
     <div class="section-sub">Completá esto ANTES de entrenar.</div>
-    <div class="field-wrap"><label class="field">🌙 Horas de sueño: <span id="w-sleep-display">${wellnessDraft.sleepHours}</span>h</label><input type="range" min="4" max="10" step="0.5" id="w-sleep" value="${wellnessDraft.sleepHours}"></div>
+    <div class="field-wrap"><label class="field">🌙 Horas de sueño: <span id="w-sleep-display">${wellnessDraft.sleepHours}</span>h</label><input type="range" min="0" max="12" step="0.5" id="w-sleep" value="${wellnessDraft.sleepHours}"></div>
     <div class="field-wrap"><label class="field">Fatiga percibida</label>${emojiRow('fatigue',FATIGUE_LEVELS,wellnessDraft.fatigue)}</div>
     <div class="field-wrap"><label class="field">Dolor muscular general</label>${emojiRow('soreness',SORENESS_LEVELS,wellnessDraft.soreness)}</div>
     <div class="field-wrap"><label class="field">Estado de ánimo</label>${emojiRow('mood',MOOD_LEVELS,wellnessDraft.mood)}</div>
@@ -5747,6 +5798,7 @@ function afterRender(){
 /* =============================== INIT =============================== */
 let appBooted = false;
 let initialLoadComplete = false;
+let wellnessDataReady = false;
 window.addEventListener('error', function(ev){
   try{
     console.error('Error capturado:', ev.message, ev.filename, ev.lineno);
@@ -5785,8 +5837,12 @@ try{ wireLoginHandlers(); }catch(e){ console.error('No se pudieron preparar los 
 (async function init(){
   try{
     await initFirebase();
-    await loadAll();
+    await loadAccountsFirst();
     initialLoadComplete = true;
+    // El resto de los datos (testeos, lesiones, calendario, wellness, etc.) sigue cargando
+    // de fondo, sin que nadie tenga que esperarlo para poder entrar — ver el aviso dentro
+    // de loadRestOfData() que refresca la pantalla sola una vez que termine.
+    const restPromise = loadRestOfData().catch(e=>console.error('Error cargando el resto de los datos en segundo plano', e));
     const session = await storageGet('session', false);
     const sessionLooksValid = session && session.role && session.accountId;
     let accountStillExists = sessionLooksValid && STATE.accounts.some(a=>a.id===session.accountId);
