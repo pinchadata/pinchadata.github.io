@@ -928,7 +928,7 @@ function avg(arr){ const a=arr.filter(n=>!isNaN(n)); if(!a.length) return 0; ret
 /* =============================== FIREBASE CONFIG =============================== */
 /* Se actualiza cada vez que se genera una versión nueva del archivo — sirve para confirmar
    rápido, desde Ajustes, si lo que está publicado en GitHub es la última versión o no. */
-const APP_VERSION = "2026-08-27.1";
+const APP_VERSION = "2026-08-27.2";
 const firebaseConfig = {
   apiKey: "AIzaSyBxcxTN2PMGZEdhj1tJcyptwRX86yg2E1w",
   authDomain: "pincha-data.firebaseapp.com",
@@ -3546,7 +3546,6 @@ function renderIndividualReport(pid){
       <div><div class="muted" style="font-size:11px;">STRAIN (Foster)</div><div class="kpi-big">${metrics.strain!==null?Math.round(metrics.strain):'—'}</div><div class="muted" style="font-size:10.5px;">carga semanal × monotonía</div></div>
     </div>
   </div>
-  ${weeklyLoadBreakdownHTML(pid)}
   ${myLifts.length? `
   <div class="card report-block"><h3>RM (repetición máxima)</h3>
     <table><thead><tr><th>Levantamiento</th><th>RM actual</th><th>90%</th><th>80%</th><th>70%</th></tr></thead>
@@ -4060,6 +4059,7 @@ function renderAnalysisBody(pid){
     <div class="card"><div class="muted" style="font-size:11px;">MONOTONÍA</div><div class="kpi-big">${metrics.monotony!==null?metrics.monotony.toFixed(2):'—'}</div><span class="badge ${monoB.cls}">${monoB.label}</span></div>
     <div class="card"><div class="muted" style="font-size:11px;">STRAIN (Foster)</div><div class="kpi-big">${metrics.strain!==null?Math.round(metrics.strain):'—'}</div><div class="muted" style="font-size:10.5px;">carga semanal × monotonía</div></div>
   </div>
+  ${weeklyLoadBreakdownHTML(pid)}
   <div class="card" style="margin-bottom:16px;">
     <h3>Wellness y carga según fase del ciclo menstrual</h3>
     <div class="section-sub">Compara los promedios de fatiga, dolor y ánimo que reportó la jugadora, agrupados según la fase del ciclo menstrual que marcó ese día. Los colores solo diferencian las 3 barras entre sí, no indican gravedad. Si ves la categoría "No aplica / No responde", es porque esos días la jugadora marcó esa opción en vez de una fase específica del ciclo (por ejemplo, si no lo quiso indicar).</div>
