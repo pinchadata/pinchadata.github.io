@@ -1254,6 +1254,56 @@ function matchRestStats(pid){
   }
   return {lastMatch, daysSinceLast, matchesLast14, avgGapDays};
 }
+function weeklyLoadBreakdownHTML(pid){
+  const w = STATE.wellness.filter(x=>x.playerId===pid).sort((a,b)=>a.date.localeCompare(b.date));
+  const today = todayStr();
+  // Últimos 7 días calendario (no solo los últimos 7 registros), para que se vea bien claro
+  // cuáles días tuvo carga y cuáles quedaron sin nada (posible día de descanso o sin cargar).
+  const last7Dates = [];
+  for(let i=6;i>=0;i--){ const d=new Date(today+'T00:00:00'); d.setDate(d.getDate()-i); last7Dates.push(dateStrLocal(d)); }
+  const byDate = {}; w.forEach(x=>{ byDate[x.date]=x; });
+  const dayRows = last7Dates.map(date=>{
+    const entry = byDate[date];
+    const minutos = entry ? Number(entry.ball||0)+Number(entry.fitness||0)+Number(entry.match||0) : 0;
+    const carga = entry ? sessionLoad(entry) : 0;
+    return {date, minutos, carga, tuvoRegistro: !!entry};
+  });
+  // Minutos totales de esta semana (últimos 7 días) vs. el promedio de las 4 semanas previas
+  // a esta — así se ve de un vistazo si hubo un salto grande en volumen.
+  const thisWeekMinutes = dayRows.reduce((s,r)=>s+r.minutos,0);
+  const prevWeeksMinutes = [];
+  for(let semana=1;semana<=4;semana++){
+    let total=0;
+    for(let i=0;i<7;i++){
+      const d=new Date(today+'T00:00:00'); d.setDate(d.getDate()-(7*semana)-i);
+      const ds=dateStrLocal(d);
+      const e=byDate[ds] || w.find(x=>x.date===ds);
+      if(e) total += Number(e.ball||0)+Number(e.fitness||0)+Number(e.match||0);
+    }
+    prevWeeksMinutes.push(total);
+  }
+  const avgPrevWeeks = avg(prevWeeksMinutes);
+  const diffPct = avgPrevWeeks>0 ? Math.round(((thisWeekMinutes-avgPrevWeeks)/avgPrevWeeks)*100) : null;
+  const maxCarga = Math.max(1, ...dayRows.map(r=>r.carga));
+  return `
+  <div class="card report-block">
+    <h3>Minutos de esta semana vs. su promedio reciente</h3>
+    <div class="section-sub">Ayuda a ver si el ACWR alto viene de un salto real de volumen, no solo de la percepción del día.</div>
+    <div class="grid grid-2" style="margin-top:10px;">
+      <div><div class="muted" style="font-size:11px;">MINUTOS ESTA SEMANA</div><div class="kpi-big">${thisWeekMinutes}′</div></div>
+      <div><div class="muted" style="font-size:11px;">PROMEDIO ÚLTIMAS 4 SEMANAS</div><div class="kpi-big">${Math.round(avgPrevWeeks)}′</div>${diffPct!==null?`<span class="badge ${diffPct>30?'danger':diffPct>0?'warn':'ok'}">${diffPct>0?'+':''}${diffPct}%</span>`:''}</div>
+    </div>
+    <div class="section-sub" style="margin-top:16px; margin-bottom:8px;">Últimos 7 días — así se ve si hubo variación o si fue todo parejo</div>
+    <div style="display:flex; gap:6px; align-items:flex-end; height:80px;">
+      ${dayRows.map(r=>`
+        <div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:4px;">
+          <div style="width:100%; height:${Math.max(4,(r.carga/maxCarga)*60)}px; background:${!r.tuvoRegistro?'var(--line)':r.carga===0?'var(--green)':'var(--red)'}; border-radius:4px 4px 0 0;" title="${fmtDate(r.date)}: ${r.tuvoRegistro?`carga ${Math.round(r.carga)}`:'sin registro'}"></div>
+          <div class="muted" style="font-size:9.5px;">${new Date(r.date+'T00:00:00').toLocaleDateString('es-AR',{weekday:'short'}).slice(0,3)}</div>
+        </div>`).join('')}
+    </div>
+    <div class="muted" style="font-size:11px; margin-top:8px;">🟩 Descanso/sin carga · 🟥 Con carga · ⬜ Sin registro cargado</div>
+  </div>`;
+}
 function computeLoadMetrics(pid){
   const w = STATE.wellness.filter(x=>x.playerId===pid).sort((a,b)=>a.date.localeCompare(b.date));
   const dates = w.map(x=>x.date);
@@ -3496,6 +3546,7 @@ function renderIndividualReport(pid){
       <div><div class="muted" style="font-size:11px;">STRAIN (Foster)</div><div class="kpi-big">${metrics.strain!==null?Math.round(metrics.strain):'—'}</div><div class="muted" style="font-size:10.5px;">carga semanal × monotonía</div></div>
     </div>
   </div>
+  ${weeklyLoadBreakdownHTML(pid)}
   ${myLifts.length? `
   <div class="card report-block"><h3>RM (repetición máxima)</h3>
     <table><thead><tr><th>Levantamiento</th><th>RM actual</th><th>90%</th><th>80%</th><th>70%</th></tr></thead>
