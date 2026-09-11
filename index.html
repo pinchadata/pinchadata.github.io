@@ -1130,6 +1130,7 @@ async function loadRestOfData(){
   let playersChanged = migratePositions();
   if(migrateCategories()) playersChanged = true;
   if(migratePositionsMulti()) playersChanged = true;
+  if(migratePrefs()) playersChanged = true;
   if(playersChanged) await safeSaveCollection('players', STATE.players, 'jugadoras');
   STATE.events = events || seedEvents();
   STATE.wellness = wellness || seedWellness(STATE.players);
@@ -1353,6 +1354,11 @@ function migrateTests(){
 function migratePositions(){
   let changed=false;
   STATE.players.forEach(p=>{ if(p.position==='Portera'){ p.position='Arquera'; changed=true; } });
+  return changed;
+}
+function migratePrefs(){
+  let changed=false;
+  STATE.players.forEach(p=>{ if(!p.prefs){ p.prefs = {}; changed=true; } });
   return changed;
 }
 function migratePositionsMulti(){
@@ -1749,7 +1755,7 @@ function seedWellness(players){
 }
 function getPlayer(id){ return STATE.players.find(p=>p.id===id); }
 function activePlayer(){ return getPlayer(STATE.activePlayerId); }
-function currentPrefs(){ return SESSION && SESSION.role==='pf' ? PF_PREFS : (activePlayer()? activePlayer().prefs : DEFAULT_PREFS); }
+function currentPrefs(){ return SESSION && SESSION.role==='pf' ? PF_PREFS : (activePlayer()? (activePlayer().prefs||{}) : DEFAULT_PREFS); }
 function currentDisplayName(){ return SESSION && SESSION.displayName ? SESSION.displayName : (SESSION && SESSION.role==='pf' ? 'Cuerpo técnico' : 'Jugadora'); }
 
 /* =============================== ANALYSIS ENGINE =============================== */
@@ -2681,7 +2687,7 @@ function renderRosterTab(){
         <button class="btn" id="btn-add-player">+ Nueva jugadora</button>
       </div>
       <div class="grid grid-3">
-        ${STATE.players.map(p=>`<div class="player-card" data-pid="${p.id}"><img class="ph" src="${p.prefs.photo||avatarFallback(p.name)}"><div class="info"><b>${p.name}</b><div class="tag">${playerPositionsLabel(p)} · ${playerCategoriesLabel(p)}</div></div></div>`).join('')}
+        ${STATE.players.map(p=>`<div class="player-card" data-pid="${p.id}"><img class="ph" src="${(p.prefs&&p.prefs.photo)||avatarFallback(p.name)}"><div class="info"><b>${p.name}</b><div class="tag">${playerPositionsLabel(p)} · ${playerCategoriesLabel(p)}</div></div></div>`).join('')}
       </div>`;
   } else if(rosterTab==='testeos'){ c.innerHTML = testFormHTML(); }
   else if(rosterTab==='comparar'){ c.innerHTML = compareHTML(); }
@@ -3269,7 +3275,7 @@ function playerHeaderCardHTML(pid){
   const rest = matchRestStats(pid);
   return `
   <div class="card player-header-card">
-    <img class="ph player-header-photo" src="${p.prefs.photo||avatarFallback(p.name)}">
+    <img class="ph player-header-photo" src="${(p.prefs&&p.prefs.photo)||avatarFallback(p.name)}">
     <div class="player-header-info">
       <div class="player-header-name">${p.name}</div>
       <div class="player-header-position">${playerPositionsLabel(p)} · Categoría ${playerCategoriesLabel(p)}</div>
