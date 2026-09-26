@@ -185,7 +185,7 @@ body::before{
 /* ---------- PLAYER HEADER CARD ---------- */
 .player-header-card{display:flex; gap:24px; align-items:center; flex-wrap:wrap;}
 .player-header-photo{width:120px; height:120px; border-radius:20px; object-fit:cover; border:3px solid var(--red); flex-shrink:0;}
-.player-header-court{width:100px; height:100px; flex-shrink:0; background:var(--bg-raise); border-radius:14px; padding:6px;}
+.player-header-court{width:65px; height:120px; flex-shrink:0; background:var(--bg-raise); border-radius:14px; padding:6px;}
 .player-header-court svg{width:100%; height:100%;}
 .position-court-svg{display:block;}
 .player-header-info{flex:1; min-width:220px;}
@@ -195,7 +195,7 @@ body::before{
 @media (max-width:860px){
   .player-header-card{gap:14px;}
   .player-header-photo{width:80px; height:80px; border-radius:16px;}
-  .player-header-court{width:70px; height:70px; border-radius:10px;}
+  .player-header-court{width:45px; height:80px; border-radius:10px;}
   .player-header-name{font-size:19px;}
   .player-header-position{margin-bottom:10px;}
   .player-header-stats .kpi-big{font-size:17px;}
@@ -246,7 +246,7 @@ body::before{
 }
 .player-card:hover{border-color:var(--red); transform:translateY(-2px);}
 .player-card .ph{width:50px; height:50px; border-radius:50%; object-fit:cover; background:var(--bg-raise); border:2px solid var(--line); flex-shrink:0;}
-.player-card-court{width:46px; height:46px; flex-shrink:0; background:var(--bg-raise); border-radius:8px; padding:3px;}
+.player-card-court{width:28px; height:50px; flex-shrink:0; background:var(--bg-raise); border-radius:8px; padding:3px;}
 .player-card-court svg{width:100%; height:100%;}
 .player-card .info b{font-size:14px; display:block;}
 .player-card .info .tag{font-size:11px; color:var(--ink-dim); margin-top:2px;}
@@ -3340,25 +3340,33 @@ function computeAge(birthdate){
   return age;
 }
 const POSITION_COURT_COORDS = {
-  'Arquera': {x:50, y:8},
-  'Pivote': {x:50, y:22},
-  'Central': {x:50, y:40},
-  'Lateral Izquierda': {x:22, y:40},
-  'Lateral Derecha': {x:78, y:40},
-  'Extremo Izquierdo': {x:6, y:10},
-  'Extremo Derecho': {x:94, y:10},
+  'Arquera': {x:25, y:93},
+  'Pivote': {x:25, y:16},
+  'Central': {x:25, y:34},
+  'Lateral Izquierda': {x:11, y:34},
+  'Lateral Derecha': {x:39, y:34},
+  'Extremo Izquierdo': {x:3, y:8},
+  'Extremo Derecho': {x:47, y:8},
 };
 function positionCourtSVG(positions){
   const activos = (positions||[]).map(pos=>POSITION_COURT_COORDS[pos]).filter(Boolean);
   return `
-  <svg viewBox="0 0 100 100" class="position-court-svg" xmlns="http://www.w3.org/2000/svg">
-    <rect x="2" y="2" width="96" height="96" rx="3" fill="rgba(95,167,119,0.16)" stroke="rgba(255,255,255,0.55)" stroke-width="1.3"/>
-    <line x1="2" y1="2" x2="98" y2="2" stroke="#fff" stroke-width="2"/>
-    <path d="M 32 2 A 26 26 0 0 0 68 2" fill="none" stroke="rgba(255,255,255,0.75)" stroke-width="1" stroke-dasharray="2.5,2"/>
-    <path d="M 20 2 A 38 38 0 0 0 80 2" fill="none" stroke="rgba(255,255,255,0.75)" stroke-width="1.2"/>
-    <rect x="41" y="0" width="18" height="6" fill="none" stroke="#fff" stroke-width="1.4"/>
-    <line x1="2" y1="96" x2="98" y2="96" stroke="#fff" stroke-width="2"/>
-    ${activos.map(c=>`<circle cx="${c.x}" cy="${c.y}" r="7" fill="var(--red)" stroke="#fff" stroke-width="1.5"/>`).join('')}
+  <svg viewBox="0 0 50 100" class="position-court-svg" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+    <rect x="1" y="1" width="48" height="98" rx="2" fill="rgba(95,167,119,0.16)" stroke="rgba(255,255,255,0.55)" stroke-width="1"/>
+    <!-- Mitad de cancha -->
+    <line x1="1" y1="50" x2="49" y2="50" stroke="#fff" stroke-width="1.3" stroke-dasharray="3,2"/>
+    <circle cx="25" cy="50" r="4.5" fill="none" stroke="rgba(255,255,255,0.6)" stroke-width="0.6"/>
+    <!-- Arco rival (arriba) — zona de ataque del resto del equipo -->
+    <line x1="1" y1="1" x2="49" y2="1" stroke="#fff" stroke-width="1.6"/>
+    <rect x="19" y="-1.5" width="12" height="4" fill="none" stroke="#fff" stroke-width="1.1"/>
+    <path d="M 12 1 A 13 13 0 0 0 38 1" fill="none" stroke="rgba(255,255,255,0.8)" stroke-width="0.8"/>
+    <line x1="22.5" y1="8" x2="27.5" y2="8" stroke="rgba(255,255,255,0.8)" stroke-width="1"/>
+    <path d="M 6 1 A 19 19 0 0 0 44 1" fill="none" stroke="rgba(255,255,255,0.8)" stroke-width="0.8" stroke-dasharray="1.8,1.5"/>
+    <!-- Arco propio (abajo) — donde juega la arquera -->
+    <line x1="1" y1="99" x2="49" y2="99" stroke="#fff" stroke-width="1.6"/>
+    <rect x="19" y="97.5" width="12" height="4" fill="none" stroke="#fff" stroke-width="1.1"/>
+    <path d="M 12 99 A 13 13 0 0 1 38 99" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="0.6"/>
+    ${activos.map(c=>`<circle cx="${c.x}" cy="${c.y}" r="3.6" fill="var(--red)" stroke="#fff" stroke-width="1"/>`).join('')}
   </svg>`;
 }
 function playerHeaderCardHTML(pid){
