@@ -866,6 +866,7 @@ const PF_NAV = [
   {view:'settings', icon:'⚙', label:'Ajustes'},
 ];
 const JUGADORA_NAV = [
+  {view:'my-profile', icon:'👤', label:'Mi Perfil'},
   {view:'wellness', icon:'◆', label:'Wellness diario'},
   {view:'calendar', icon:'📅', label:'Calendario'},
   {view:'planning', icon:'📋', label:'Planificación'},
@@ -885,6 +886,7 @@ const VIEW_TITLES = {
   notifications:['Notificaciones','Recordatorios para el plantel'],
   planning:['Planificación','Biblioteca de ejercicios y plan semanal'],
   wellness:['Wellness diario','Carga percibida, ciclo, entrenamiento y molestias de hoy'],
+  'my-profile':['Mi Perfil','Tu información básica'],
   'my-tests':['Mis testeos','Tu evolución física a lo largo de la temporada'],
   'my-injury':['Mi estado físico','Tu historial clínico y kinesiológico'],
   'my-rm':['RM','Tus repeticiones máximas y porcentajes de carga'],
@@ -1243,6 +1245,15 @@ function effectiveMatchStats(pid){
   const totalMinutes = hasManual ? Number(manual.minutes||0) : auto.totalMinutes;
   const avgMinutes = matchesPlayed ? totalMinutes/matchesPlayed : 0;
   return { matchesPlayed, totalMinutes, avgMinutes, source: hasManual?'manual':'auto', auto };
+}
+function computeMatchStatsFromWellness(pid){
+  // En vez de depender de que alguien cargue "cantidad de partidos" a mano, lo calculamos
+  // directo de lo que cada jugadora respondió en la PSE de después de cada partido: si marcó
+  // que jugó, cuenta como partido, y sumamos los minutos que puso en el slider de "Partido".
+  const entries = STATE.wellness.filter(w=>w.playerId===pid && w.playedMatch===true);
+  const matches = entries.length;
+  const minutes = entries.reduce((sum,w)=>sum+Number(w.match||0), 0);
+  return {matches, minutes};
 }
 function matchRestStats(pid){
   const p = getPlayer(pid);
@@ -2420,6 +2431,7 @@ function render(){
   else if(currentView==='calendar') root.innerHTML = viewCalendar();
   else if(currentView==='planning') root.innerHTML = viewPlanning();
   else if(currentView==='wellness') root.innerHTML = viewWellness();
+  else if(currentView==='my-profile') root.innerHTML = playerHeaderCardHTML(SESSION.playerId);
   else if(currentView==='my-tests') root.innerHTML = playerProfileHTML(SESSION.playerId, false);
   else if(currentView==='my-injury') root.innerHTML = myInjuryView();
   else if(currentView==='my-rm') root.innerHTML = myRmView();
@@ -3170,7 +3182,7 @@ function downloadFullBackup(){
   STATE.plans.forEach(pl=>{ pl.items.forEach(it=>{ const ex=STATE.exercises.find(e=>e.id===it.exerciseId); planDetailRows.push({Origen:'Equipo', Plan:pl.label, Jugadora:'', Dia:it.day||'', Ejercicio:ex?ex.name:'(eliminado)', Categoria:ex?ex.category:'', Series:it.sets||'', Notas:it.notes||''}); }); });
   STATE.individualPlans.forEach(pl=>{ pl.items.forEach(it=>{ const ex=STATE.exercises.find(e=>e.id===it.exerciseId); planDetailRows.push({Origen:'Individual', Plan:pl.label, Jugadora:nameOf(pl.playerId), Dia:it.day||'', Ejercicio:ex?ex.name:'(eliminado)', Categoria:ex?ex.category:'', Series:it.sets||'', Notas:it.notes||''}); }); });
   exportToExcel(`backup-completo-pincha-data-${todayStr()}.xlsx`, {
-    Jugadoras: STATE.players.map(p=>({Nombre:p.name, Puesto:playerPositionsLabel(p), Categoria:playerCategoriesLabel(p), FechaNacimiento:p.birthdate||'', Altura:p.height||'', Peso:p.weight||'', PartidosManual:(p.stats&&p.stats.matches)||0, MinutosManual:(p.stats&&p.stats.minutes)||0})),
+    Jugadoras: STATE.players.map(p=>{ const ms = computeMatchStatsFromWellness(p.id); return {Nombre:p.name, Puesto:playerPositionsLabel(p), Categoria:playerCategoriesLabel(p), FechaNacimiento:p.birthdate||'', Altura:p.height||'', Peso:p.weight||'', PartidosCalculados:ms.matches, MinutosCalculados:ms.minutes, PartidosManual:(p.stats&&p.stats.matches)||0, MinutosManual:(p.stats&&p.stats.minutes)||0}; }),
     Testeos: STATE.tests.map(t=>({Jugadora:nameOf(t.playerId), Tipo:t.type, Valor:t.value, Unidad:t.unit||'', Fecha:t.date})),
     Lesiones: STATE.injuries.map(i=>({Jugadora:nameOf(i.playerId), Tipo:i.type, Zona:i.zone||'', Fecha:i.date, Gravedad:i.severity, Estado:i.status, EtapaRTP:RTP_STAGES[i.stage!==undefined?i.stage:0], Kinesiologia:i.kinesio?'Sí':'No', Descripcion:i.description||''})),
     Wellness: STATE.wellness.map(w=>({Jugadora:nameOf(w.playerId), Fecha:w.date, Sueno:w.sleepHours, Fatiga:w.fatigue, Dolor:w.soreness, Animo:w.mood, Ciclo:w.cyclePhase, CategoriaDelDia:w.dayCategory||'', MinPelota:w.ball||0, MinFisico:w.fitness||0, MinPartido:w.match||0, RPEFisico:w.rpeFisico||'', RPEPelota:w.rpePelota||'', Lesionada:w.injured?'Sí':'No'})),
@@ -3352,7 +3364,7 @@ function playerHeaderCardHTML(pid){
   const p = getPlayer(pid);
   if(!p) return '';
   const age = computeAge(p.birthdate);
-  const s = p.stats;
+  const matchStats = computeMatchStatsFromWellness(pid);
   const rest = matchRestStats(pid);
   return `
   <div class="card player-header-card">
@@ -3367,10 +3379,10 @@ function playerHeaderCardHTML(pid){
         <div><div class="muted" style="font-size:10.5px;">PESO</div><div class="kpi-big">${p.weight?p.weight+' kg':'—'}</div></div>
         <div><div class="muted" style="font-size:10.5px;">PUESTO</div><div class="kpi-big" style="font-size:${playerPositions(p).length>1?'12px':'16px'};">${playerPositionsLabel(p)}</div></div>
       </div>
-      ${(s && (s.matches||s.minutes)) || rest.lastMatch ? `
+      ${matchStats.matches>0 || rest.lastMatch ? `
       <div class="grid grid-4 player-header-stats" style="margin-top:14px;">
-        <div><div class="muted" style="font-size:10.5px;">PARTIDOS</div><div class="kpi-big">${(s&&s.matches)||0}</div></div>
-        <div><div class="muted" style="font-size:10.5px;">MINUTOS</div><div class="kpi-big">${(s&&s.minutes)||0}</div></div>
+        <div><div class="muted" style="font-size:10.5px;">PARTIDOS</div><div class="kpi-big">${matchStats.matches}</div></div>
+        <div><div class="muted" style="font-size:10.5px;">MINUTOS</div><div class="kpi-big">${matchStats.minutes}</div></div>
         <div><div class="muted" style="font-size:10.5px;">DÍAS S/ ÚLT. PARTIDO</div><div class="kpi-big" style="color:${rest.daysSinceLast!==null && rest.daysSinceLast<=2 ? 'var(--amber)':'var(--white)'};">${rest.daysSinceLast!==null?rest.daysSinceLast:'—'}</div></div>
         <div><div class="muted" style="font-size:10.5px;">PARTIDOS / 14D</div><div class="kpi-big" style="color:${rest.matchesLast14>=3?'var(--red)':'var(--white)'};">${rest.matchesLast14}</div></div>
       </div>` : ''}
@@ -5154,6 +5166,12 @@ function isTrainingOrMatchDay(playerId, dateStr){
   const myCats = playerCategories(p);
   return STATE.events.some(e=> e.date===dateStr && (e.type==='Entrenamiento'||e.type==='Partido') && (e.category==='Ambas' || myCats.includes(e.category)) );
 }
+function isMatchDay(playerId, dateStr){
+  const p = getPlayer(playerId);
+  if(!p) return false;
+  const myCats = playerCategories(p);
+  return STATE.events.some(e=> e.date===dateStr && e.type==='Partido' && (e.category==='Ambas' || myCats.includes(e.category)) );
+}
 function missingWellnessDays(playerId){
   const out = [];
   for(let i=1;i<=6;i++){
@@ -5209,8 +5227,9 @@ function viewWellness(){
     sleepHours:Number(entry.sleepHours), fatigue:Number(entry.fatigue), soreness:Number(entry.soreness), mood:Number(entry.mood),
     ball:Number(entry.ball||0), fitness:Number(entry.fitness||0), match:Number(entry.match||0),
     rpeFisico: entry.rpeFisico!==undefined ? Number(entry.rpeFisico) : 5, rpePelota: entry.rpePelota!==undefined ? Number(entry.rpePelota) : 5,
-    cyclePhase: entry.cyclePhase, injured: entry.injured, kinesio: entry.kinesio, injuryDesc: entry.injuryDesc||'', dayCategory: entry.dayCategory || myCats[0] || ''
-  } : {sleepHours:7, fatigue:3, soreness:2, mood:4, ball:0, fitness:0, match:0, rpeFisico:5, rpePelota:5, cyclePhase:CYCLE_PHASES[4], injured:false, kinesio:false, injuryDesc:'', dayCategory: myCats[0] || ''};
+    cyclePhase: entry.cyclePhase, injured: entry.injured, kinesio: entry.kinesio, injuryDesc: entry.injuryDesc||'', dayCategory: entry.dayCategory || myCats[0] || '',
+    playedMatch: entry.playedMatch!==undefined ? entry.playedMatch : null
+  } : {sleepHours:7, fatigue:3, soreness:2, mood:4, ball:0, fitness:0, match:0, rpeFisico:5, rpePelota:5, cyclePhase:CYCLE_PHASES[4], injured:false, kinesio:false, injuryDesc:'', dayCategory: myCats[0] || '', playedMatch: null};
   rpeTouched = { fisico: !!(entry && entry.rpeFisico!==undefined), pelota: !!(entry && entry.rpePelota!==undefined) };
   selectedPainAreas = entry ? JSON.parse(JSON.stringify(entry.painAreas||[])) : [];
 
@@ -5325,11 +5344,20 @@ function wellnessPreFormHTML(p, targetDate, isToday, entry){
   </div>`;
 }
 function wellnessPostFormHTML(p, targetDate, isToday, myCats){
+  const esDiaDePartido = isMatchDay(p.id, targetDate);
   return `
   <div class="card" style="margin-bottom:16px;">
     <h3>Carga de entrenamiento de ${isToday?'hoy':'ese día'}</h3>
     <div class="section-sub">Completá esto DESPUÉS de entrenar.</div>
     ${myCats.length>1? `<div class="field-wrap"><label class="field">¿Con qué categoría entrenaste/jugaste?</label><select id="w-daycategory">${myCats.map(c=>`<option ${wellnessDraft.dayCategory===c?'selected':''}>${c}</option>`).join('')}</select></div>` : ''}
+    ${esDiaDePartido? `
+    <div class="field-wrap">
+      <label class="field">¿Jugaste este partido?</label>
+      <div style="display:flex; gap:10px;">
+        <button type="button" class="btn ${wellnessDraft.playedMatch===true?'':'secondary'} sm" id="w-played-yes" style="flex:1;">Sí, jugué</button>
+        <button type="button" class="btn ${wellnessDraft.playedMatch===false?'':'secondary'} sm" id="w-played-no" style="flex:1;">No jugué</button>
+      </div>
+    </div>` : ''}
     <div class="load-row" data-type="ball">
       <div class="load-icon" style="background:rgba(95,140,167,0.18); color:var(--blue);">🤾</div>
       <div class="load-body">
@@ -5677,6 +5705,12 @@ function afterRender(){
         updateLoadBadge();
       });
     });
+    const playedYesBtn = document.getElementById('w-played-yes');
+    const playedNoBtn = document.getElementById('w-played-no');
+    if(playedYesBtn && playedNoBtn){
+      playedYesBtn.addEventListener('click', ()=>{ wellnessDraft.playedMatch = true; playedYesBtn.classList.remove('secondary'); playedNoBtn.classList.add('secondary'); });
+      playedNoBtn.addEventListener('click', ()=>{ wellnessDraft.playedMatch = false; playedNoBtn.classList.remove('secondary'); playedYesBtn.classList.add('secondary'); });
+    }
     const rpeFisicoInput = document.getElementById('w-rpe-fisico');
     if(rpeFisicoInput) rpeFisicoInput.addEventListener('input', e=>{
       wellnessDraft.rpeFisico = Number(e.target.value);
@@ -5711,7 +5745,8 @@ function afterRender(){
       return {
         ball: wellnessDraft.ball, fitness: wellnessDraft.fitness, match: wellnessDraft.match,
         rpeFisico: wellnessDraft.rpeFisico, rpePelota: wellnessDraft.rpePelota,
-        dayCategory: dayCategoryEl ? dayCategoryEl.value : (myCats[0] || '')
+        dayCategory: dayCategoryEl ? dayCategoryEl.value : (myCats[0] || ''),
+        playedMatch: wellnessDraft.playedMatch
       };
     }
     async function persistWellness(fields){
