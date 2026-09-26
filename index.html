@@ -185,6 +185,9 @@ body::before{
 /* ---------- PLAYER HEADER CARD ---------- */
 .player-header-card{display:flex; gap:24px; align-items:center; flex-wrap:wrap;}
 .player-header-photo{width:120px; height:120px; border-radius:20px; object-fit:cover; border:3px solid var(--red); flex-shrink:0;}
+.player-header-court{width:100px; height:100px; flex-shrink:0; background:var(--bg-raise); border-radius:14px; padding:6px;}
+.player-header-court svg{width:100%; height:100%;}
+.position-court-svg{display:block;}
 .player-header-info{flex:1; min-width:220px;}
 .player-header-name{font-family:var(--font-display); font-size:26px; font-weight:600; letter-spacing:0.2px; line-height:1.1;}
 .player-header-position{color:var(--ink-dim); font-size:13.5px; margin-top:4px; margin-bottom:14px;}
@@ -192,6 +195,7 @@ body::before{
 @media (max-width:860px){
   .player-header-card{gap:14px;}
   .player-header-photo{width:80px; height:80px; border-radius:16px;}
+  .player-header-court{width:70px; height:70px; border-radius:10px;}
   .player-header-name{font-size:19px;}
   .player-header-position{margin-bottom:10px;}
   .player-header-stats .kpi-big{font-size:17px;}
@@ -242,6 +246,8 @@ body::before{
 }
 .player-card:hover{border-color:var(--red); transform:translateY(-2px);}
 .player-card .ph{width:50px; height:50px; border-radius:50%; object-fit:cover; background:var(--bg-raise); border:2px solid var(--line); flex-shrink:0;}
+.player-card-court{width:46px; height:46px; flex-shrink:0; background:var(--bg-raise); border-radius:8px; padding:3px;}
+.player-card-court svg{width:100%; height:100%;}
 .player-card .info b{font-size:14px; display:block;}
 .player-card .info .tag{font-size:11px; color:var(--ink-dim); margin-top:2px;}
 .badge{display:inline-block; font-size:10px; padding:3px 9px; border-radius:20px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; max-width:100%; overflow-wrap:break-word;}
@@ -2741,7 +2747,7 @@ function renderRosterTab(){
         <button class="btn" id="btn-add-player">+ Nueva jugadora</button>
       </div>
       <div class="grid grid-3">
-        ${STATE.players.map(p=>`<div class="player-card" data-pid="${p.id}"><img class="ph" src="${(p.prefs&&p.prefs.photo)||avatarFallback(p.name)}"><div class="info"><b>${p.name}</b><div class="tag">${playerPositionsLabel(p)} · ${playerCategoriesLabel(p)}</div></div></div>`).join('')}
+        ${STATE.players.map(p=>`<div class="player-card" data-pid="${p.id}"><img class="ph" src="${(p.prefs&&p.prefs.photo)||avatarFallback(p.name)}"><div class="player-card-court" title="${playerPositionsLabel(p)}">${positionCourtSVG(playerPositions(p))}</div><div class="info"><b>${p.name}</b><div class="tag">${playerPositionsLabel(p)} · ${playerCategoriesLabel(p)}</div></div></div>`).join('')}
       </div>`;
   } else if(rosterTab==='testeos'){ c.innerHTML = testFormHTML(); }
   else if(rosterTab==='comparar'){ c.innerHTML = compareHTML(); }
@@ -3321,6 +3327,27 @@ function computeAge(birthdate){
   if(m<0 || (m===0 && now.getDate()<b.getDate())) age--;
   return age;
 }
+const POSITION_COURT_COORDS = {
+  'Arquera': {x:50, y:91},
+  'Central': {x:50, y:44},
+  'Pivote': {x:50, y:66},
+  'Lateral Izquierda': {x:23, y:52},
+  'Lateral Derecha': {x:77, y:52},
+  'Extremo Izquierdo': {x:7, y:22},
+  'Extremo Derecho': {x:93, y:22},
+};
+function positionCourtSVG(positions){
+  const activos = (positions||[]).map(pos=>POSITION_COURT_COORDS[pos]).filter(Boolean);
+  return `
+  <svg viewBox="0 0 100 100" class="position-court-svg" xmlns="http://www.w3.org/2000/svg">
+    <rect x="2" y="2" width="96" height="96" rx="3" fill="none" stroke="var(--line)" stroke-width="1.2"/>
+    <line x1="2" y1="2" x2="98" y2="2" stroke="var(--line)" stroke-width="1.5"/>
+    <path d="M 32 2 A 26 26 0 0 0 68 2" fill="none" stroke="var(--line)" stroke-width="0.8" stroke-dasharray="2,1.5"/>
+    <path d="M 20 2 A 38 38 0 0 0 80 2" fill="none" stroke="var(--line)" stroke-width="1"/>
+    <rect x="42" y="2" width="16" height="6" fill="none" stroke="var(--line)" stroke-width="1"/>
+    ${activos.map(c=>`<circle cx="${c.x}" cy="${c.y}" r="6" fill="var(--red)" stroke="#fff" stroke-width="1"/>`).join('')}
+  </svg>`;
+}
 function playerHeaderCardHTML(pid){
   const p = getPlayer(pid);
   if(!p) return '';
@@ -3330,6 +3357,7 @@ function playerHeaderCardHTML(pid){
   return `
   <div class="card player-header-card">
     <img class="ph player-header-photo" src="${(p.prefs&&p.prefs.photo)||avatarFallback(p.name)}">
+    <div class="player-header-court" title="${playerPositionsLabel(p)}">${positionCourtSVG(playerPositions(p))}</div>
     <div class="player-header-info">
       <div class="player-header-name">${p.name}</div>
       <div class="player-header-position">${playerPositionsLabel(p)} · Categoría ${playerCategoriesLabel(p)}</div>
