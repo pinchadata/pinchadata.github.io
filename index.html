@@ -121,7 +121,7 @@ body::before{
 }
 .nav-btn:hover{background:var(--bg-raise); color:var(--white);}
 .nav-btn.active{background:var(--red); color:var(--white);}
-.nav-btn .ic{width:18px; text-align:center; font-size:15px;}
+.nav-btn .ic{width:24px; text-align:center; font-size:15px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;}
 .sidebar-footer{margin-top:auto; padding:10px; font-size:10.5px; color:var(--ink-dim); border-top:1px solid var(--line); padding-top:14px;}
 
 .main{flex:1; min-width:0; display:flex; flex-direction:column;}
@@ -185,7 +185,7 @@ body::before{
 /* ---------- PLAYER HEADER CARD ---------- */
 .player-header-card{display:flex; gap:24px; align-items:center; flex-wrap:wrap;}
 .player-header-photo{width:120px; height:120px; border-radius:20px; object-fit:cover; border:3px solid var(--red); flex-shrink:0;}
-.player-header-court{width:65px; height:120px; flex-shrink:0; background:var(--bg-raise); border-radius:14px; padding:6px;}
+.player-header-court{width:88px; height:165px; flex-shrink:0; background:var(--bg-raise); border-radius:14px; padding:6px;}
 .player-header-court svg{width:100%; height:100%;}
 .position-court-svg{display:block;}
 .player-header-info{flex:1; min-width:220px;}
@@ -195,7 +195,7 @@ body::before{
 @media (max-width:860px){
   .player-header-card{gap:14px;}
   .player-header-photo{width:80px; height:80px; border-radius:16px;}
-  .player-header-court{width:45px; height:80px; border-radius:10px;}
+  .player-header-court{width:58px; height:108px; border-radius:10px;}
   .player-header-name{font-size:19px;}
   .player-header-position{margin-bottom:10px;}
   .player-header-stats .kpi-big{font-size:17px;}
@@ -246,7 +246,7 @@ body::before{
 }
 .player-card:hover{border-color:var(--red); transform:translateY(-2px);}
 .player-card .ph{width:50px; height:50px; border-radius:50%; object-fit:cover; background:var(--bg-raise); border:2px solid var(--line); flex-shrink:0;}
-.player-card-court{width:28px; height:50px; flex-shrink:0; background:var(--bg-raise); border-radius:8px; padding:3px;}
+.player-card-court{width:38px; height:68px; flex-shrink:0; background:var(--bg-raise); border-radius:8px; padding:3px;}
 .player-card-court svg{width:100%; height:100%;}
 .player-card .info b{font-size:14px; display:block;}
 .player-card .info .tag{font-size:11px; color:var(--ink-dim); margin-top:2px;}
@@ -866,7 +866,7 @@ const PF_NAV = [
   {view:'settings', icon:'⚙', label:'Ajustes'},
 ];
 const JUGADORA_NAV = [
-  {view:'my-profile', icon:'👤', label:'Mi Perfil'},
+  {view:'my-profile', icon:'👤', label:'Perfil'},
   {view:'wellness', icon:'◆', label:'Wellness diario'},
   {view:'calendar', icon:'📅', label:'Calendario'},
   {view:'planning', icon:'📋', label:'Planificación'},
