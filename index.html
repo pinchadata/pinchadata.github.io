@@ -527,6 +527,7 @@ input[type=range]::-moz-range-thumb{width:19px; height:19px; border-radius:50%; 
   .session-box{gap:4px;}
   .session-box .btn.sm{padding:5px 7px; font-size:10px;}
 }
+.plan-block-header{margin:16px 0 8px; padding:6px 10px; font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--white); background:rgba(200,16,46,.18); border-left:3px solid var(--red); border-radius:4px;}
 </style>
 </head>
 <body>
@@ -940,7 +941,7 @@ function avg(arr){ const a=arr.filter(n=>!isNaN(n)); if(!a.length) return 0; ret
 /* =============================== FIREBASE CONFIG =============================== */
 /* Se actualiza cada vez que se genera una versión nueva del archivo — sirve para confirmar
    rápido, desde Ajustes, si lo que está publicado en GitHub es la última versión o no. */
-const APP_VERSION = "2026-08-27.2";
+const APP_VERSION = "2026-10-10.1";
 const firebaseConfig = {
   apiKey: "AIzaSyBxcxTN2PMGZEdhj1tJcyptwRX86yg2E1w",
   authDomain: "pincha-data.firebaseapp.com",
@@ -1610,6 +1611,54 @@ const CATEGORY_STYLE = {
 const RM_PERCENTAGES = [100,95,90,85,80,75,70];
 function roundToHalf(n){ return Math.round(n*2)/2; }
 const EXERCISE_CATEGORIES = ['Dominante de rodilla','Dominante de cadera','Empuje','Tracción','Zona media','Movilidad y activación','Potencia / Olímpico'];
+
+const PLAN_BLOCKS = ['Liberación miofascial','Movilidad articular','Activación muscular','Parte central'];
+function planBlockHeaderHTML(name){
+  return `<div class="plan-block-header">${name}</div>`;
+}
+const PLAN_TEMPLATES = {
+  lunes: {
+    day:'Lunes',
+    title:'Plan semanal de entrenamiento',
+    desc:'Lunes · Regenerativo post-partido',
+    items:[
+      {block:'Liberación miofascial', cat:'Movilidad y activación', ex:'Liberación miofascial con elementos de automasaje', label:'', sets:'10-15 min', notes:''},
+      {block:'Movilidad articular', cat:'Movilidad y activación', ex:'Cristos + rotación', label:'1', sets:'3x6/6', notes:''},
+      {block:'Movilidad articular', cat:'Movilidad y activación', ex:'Psoas + isquios', label:'2', sets:'3x6/6', notes:''},
+      {block:'Movilidad articular', cat:'Movilidad y activación', ex:'CARS de hombros a 2 brazos', label:'3', sets:'3x4', notes:''},
+      {block:'Activación muscular', cat:'Movilidad y activación', ex:'Estocada lateral + movilidad de caderas', label:'1', sets:'3x4/4', notes:''},
+      {block:'Activación muscular', cat:'Zona media', ex:'Bicho muerto + presión', label:'2', sets:'3x6/6', notes:''},
+      {block:'Parte central', cat:'Empuje', ex:'Press plano', label:'A1', sets:'3x3', notes:'Al 85% RM'},
+      {block:'Parte central', cat:'Potencia / Olímpico', ex:'Saltos al cajón', label:'A2', sets:'3x5', notes:''},
+      {block:'Parte central', cat:'Movilidad y activación', ex:'Rotaciones de hombros con carga', label:'A3', sets:'3x6', notes:''},
+      {block:'Parte central', cat:'Zona media', ex:'Serrucho', label:'A4', sets:'3x6/6', notes:''},
+      {block:'Parte central', cat:'Dominante de cadera', ex:'Hip thrust con mini banda', label:'A5', sets:'3x8', notes:'Al 70% RM de peso muerto'}
+    ]
+  }
+};
+async function loadPlanTemplate(key){
+  const t = PLAN_TEMPLATES[key]; if(!t) return;
+  let plan = STATE.plans.find(p=>p.label===t.title);
+  if(!plan){
+    plan = {id:uid(), label:t.title, dateFrom:todayStr(), dateTo:'', notes:'Plan de los 3 días de entrenamiento en el club (lunes, miércoles y viernes).', items:[]};
+    STATE.plans.push(plan);
+  }
+  if(plan.items.some(it=>it.day===t.day)){
+    if(!confirm('El '+t.day+' ya tiene ejercicios cargados en este plan. ¿Reemplazarlos por la plantilla?')) return;
+    plan.items = plan.items.filter(it=>it.day!==t.day);
+  }
+  let newEx = 0;
+  t.items.forEach(row=>{
+    let ex = STATE.exercises.find(e=>e.name.trim().toLowerCase()===row.ex.toLowerCase());
+    if(!ex){ ex = {id:uid(), category:row.cat, name:row.ex, description:'', videoUrl:''}; STATE.exercises.push(ex); newEx++; }
+    plan.items.push({exerciseId:ex.id, day:t.day, block:row.block, label:row.label, sets:row.sets, notes:row.notes});
+  });
+  activeTeamPlanId = plan.id;
+  if(newEx) await saveExercises();
+  await savePlans();
+  toast(t.desc+' cargado');
+  renderPlanningTab();
+}
 const DAYS_OF_WEEK = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
 function seedExercises(){
   const mk = (category, name, description) => ({id:uid(), category, name, description, videoUrl:''});
@@ -4446,11 +4495,15 @@ function wireDayTabs(){
   }));
 }
 function renderPlanItemsSequence(items){
+  let lastBlock = null;
   return items.map((it,idx)=>{
     const ex = STATE.exercises.find(e=>e.id===it.exerciseId);
     if(!ex) return '';
     const style = CATEGORY_STYLE[ex.category] || {icon:'🔹', color:'var(--ink-dim)'};
-    return `
+    let head = '';
+    if(it.block && it.block!==lastBlock){ head = planBlockHeaderHTML(it.block); }
+    lastBlock = it.block || null;
+    return head + `
     <div class="plan-exercise plan-exercise-ordered" style="border-left-color:${style.color};">
       <div class="plan-exercise-order">${it.label ? it.label : idx+1}</div>
       <div class="plan-exercise-body">
@@ -4523,6 +4576,11 @@ function planTabHTML(){
     <div class="field-wrap"><label class="field">Notas generales</label><input id="plan-notes" placeholder="Objetivo de la semana..."></div>
     <button class="btn" id="btn-create-plan">Crear plan</button>
   </div>
+  <div class="card" style="margin-bottom:16px;">
+    <h3>Plantillas de día</h3>
+    <div class="muted" style="font-size:12.5px; margin-bottom:10px;">Carga el día completo (bloques, ejercicios, series y recomendaciones) en el plan "Plan semanal de entrenamiento". Después podés editar cada ejercicio.</div>
+    <button class="btn secondary" id="btn-tpl-lunes">📋 Cargar Lunes · Regenerativo post-partido</button>
+  </div>
   ${sorted.length ? `
   <div class="card" style="margin-bottom:16px;">
     <h3>Editar un plan</h3>
@@ -4533,7 +4591,8 @@ function planTabHTML(){
       <div class="field-wrap"><label class="field">Ejercicio</label><select id="plan-exercise"></select></div>
     </div>
     <div class="row">
-      <div class="field-wrap"><label class="field">Etiqueta (opcional)</label><input id="plan-item-label" placeholder="Ej: 1a, b2..."></div>
+      <div class="field-wrap"><label class="field">Bloque (opcional)</label><select id="plan-block"><option value="">(sin bloque)</option>${PLAN_BLOCKS.map(b=>`<option>${b}</option>`).join('')}</select></div>
+      <div class="field-wrap"><label class="field">Etiqueta (opcional)</label><input id="plan-item-label" placeholder="Ej: A1, 1, 2..."></div>
       <div class="field-wrap"><label class="field">Series x reps</label><input id="plan-sets" placeholder="Ej: 3x10"></div>
       <div class="field-wrap"><label class="field">Nota (opcional)</label><input id="plan-item-notes" placeholder="Progresión, carga sugerida..."></div>
       <div class="field-wrap"><label class="field">Ubicar en</label><select id="plan-position">
@@ -4630,12 +4689,16 @@ function editablePlanItemsHTML(items){
   `;
 }
 function editablePlanItemsSequence(items, idxs){
+  let lastBlock = null;
   return idxs.map((idx,pos)=>{
     const it = items[idx];
     const ex = STATE.exercises.find(e=>e.id===it.exerciseId);
     if(!ex) return '';
     const style = CATEGORY_STYLE[ex.category] || {icon:'🔹', color:'var(--ink-dim)'};
-    return `
+    let head = '';
+    if(it.block && it.block!==lastBlock){ head = planBlockHeaderHTML(it.block); }
+    lastBlock = it.block || null;
+    return head + `
     <div class="plan-exercise-editable" style="border-left-color:${style.color};">
       <div class="plan-order-controls">
         <button type="button" class="btn ghost sm plan-move-up" data-idx="${idx}" ${pos===0?'disabled':''}>▲</button>
@@ -4847,6 +4910,8 @@ function wirePlanningTab(){
       activeTeamPlanId = rec.id;
       await savePlans(); toast('Plan creado'); renderPlanningTab();
     });
+    const tplL = document.getElementById('btn-tpl-lunes');
+    if(tplL) tplL.addEventListener('click', ()=>loadPlanTemplate('lunes'));
     const activeSel = document.getElementById('plan-select-active');
     if(activeSel) activeSel.addEventListener('change', ()=>{ activeTeamPlanId = activeSel.value; renderPlanningTab(); });
     const addItemBtn = document.getElementById('btn-add-plan-item');
@@ -4864,7 +4929,7 @@ function wirePlanningTab(){
         if(!exerciseId){ toast('No hay ejercicios en esa categoría todavía'); return; }
         const plan = STATE.plans.find(p=>p.id===activeTeamPlanId);
         if(!plan) return;
-        const newItem = {exerciseId, day:document.getElementById('plan-day').value, label:document.getElementById('plan-item-label').value.trim(), sets:document.getElementById('plan-sets').value.trim(), notes:document.getElementById('plan-item-notes').value.trim()};
+        const newItem = {exerciseId, day:document.getElementById('plan-day').value, block:document.getElementById('plan-block').value, label:document.getElementById('plan-item-label').value.trim(), sets:document.getElementById('plan-sets').value.trim(), notes:document.getElementById('plan-item-notes').value.trim()};
         insertPlanItem(plan, newItem, document.getElementById('plan-position').value);
         await savePlans(); toast('Ejercicio agregado al plan'); renderPlanningTab();
       });
@@ -4931,6 +4996,7 @@ function openEditPlanItemModal(plan, idx, saveFn){
       <div class="field-wrap"><label class="field">Día de la semana</label><select id="epi-day">${DAYS_OF_WEEK.map(d=>`<option ${item.day===d?'selected':''}>${d}</option>`).join('')}</select></div>
       <div class="field-wrap"><label class="field">Patrón de movimiento</label><select id="epi-category">${EXERCISE_CATEGORIES.map(c=>`<option ${currentEx&&currentEx.category===c?'selected':''}>${c}</option>`).join('')}</select></div>
       <div class="field-wrap"><label class="field">Ejercicio</label><select id="epi-exercise"></select></div>
+      <div class="field-wrap"><label class="field">Bloque (opcional)</label><select id="epi-block"><option value="">(sin bloque)</option>${PLAN_BLOCKS.map(b=>`<option ${item.block===b?'selected':''}>${b}</option>`).join('')}</select></div>
       <div class="field-wrap"><label class="field">Etiqueta (opcional)</label><input id="epi-label" value="${item.label||''}" placeholder="Ej: 1a, b2..."></div>
       <div class="field-wrap"><label class="field">Series x reps</label><input id="epi-sets" value="${item.sets||''}"></div>
       <div class="field-wrap"><label class="field">Nota (opcional)</label><input id="epi-notes" value="${item.notes||''}"></div>
@@ -4950,7 +5016,7 @@ function openEditPlanItemModal(plan, idx, saveFn){
   document.getElementById('epi-save').onclick = async ()=>{
     const exerciseId = exerciseSel.value;
     if(!exerciseId){ toast('Elegí un ejercicio'); return; }
-    plan.items[idx] = { exerciseId, day:document.getElementById('epi-day').value, label:document.getElementById('epi-label').value.trim(), sets:document.getElementById('epi-sets').value.trim(), notes:document.getElementById('epi-notes').value.trim() };
+    plan.items[idx] = { exerciseId, day:document.getElementById('epi-day').value, block:document.getElementById('epi-block').value, label:document.getElementById('epi-label').value.trim(), sets:document.getElementById('epi-sets').value.trim(), notes:document.getElementById('epi-notes').value.trim() };
     await saveFn(); closeModal(); toast('Ejercicio actualizado'); renderPlanningTab();
   };
 }
