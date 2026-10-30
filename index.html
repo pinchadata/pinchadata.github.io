@@ -528,6 +528,14 @@ input[type=range]::-moz-range-thumb{width:19px; height:19px; border-radius:50%; 
   .session-box .btn.sm{padding:5px 7px; font-size:10px;}
 }
 .plan-block-header{margin:16px 0 8px; padding:6px 10px; font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--white); background:rgba(200,16,46,.18); border-left:3px solid var(--red); border-radius:4px;}
+
+.min-stepper{display:flex; align-items:center; gap:6px; margin-top:8px;}
+.min-stepper .min-btn{flex:0 0 auto; min-width:42px; height:38px; border-radius:10px; border:1.5px solid var(--line, rgba(255,255,255,.18)); background:var(--bg-raise); color:var(--white); font-weight:700; font-size:14px; cursor:pointer;}
+.min-stepper .min-btn:active{transform:scale(.95);}
+.min-stepper input[type=number]{flex:1; min-width:0; height:38px; text-align:center; font-family:var(--font-mono); font-size:18px; font-weight:700; border-radius:10px;}
+.match-banner{display:flex; align-items:center; gap:12px; padding:12px 14px; font-size:15px; border-radius:12px; margin-bottom:14px; border:1.5px solid var(--red); background:rgba(200,16,46,.10); font-weight:600;}
+.match-banner .mb-ic{font-size:26px; line-height:1;}
+.match-chip{display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700; background:rgba(200,16,46,.18); color:var(--red);}
 </style>
 </head>
 <body>
@@ -651,6 +659,9 @@ const CYCLE_PHASE_INFO = [
 const FATIGUE_LEVELS=[{e:'😃',l:'Fresca'},{e:'🙂',l:'Bien'},{e:'😐',l:'Normal'},{e:'😣',l:'Cansada'},{e:'🥵',l:'Agotada'}];
 const SORENESS_LEVELS=[{e:'💪',l:'Nada'},{e:'🙂',l:'Leve'},{e:'😐',l:'Moderado'},{e:'😖',l:'Molesto'},{e:'🔥',l:'Intenso'}];
 const MOOD_LEVELS=[{e:'😞',l:'Bajón'},{e:'😕',l:'Meh'},{e:'😐',l:'Neutral'},{e:'🙂',l:'Bien'},{e:'🤩',l:'Excelente'}];
+const READY_LEVELS=[{e:'😟',l:'Nada lista'},{e:'😕',l:'Poco lista'},{e:'😐',l:'Normal'},{e:'🙂',l:'Lista'},{e:'💪',l:'A tope'}];
+const NERVES_LEVELS=[{e:'😌',l:'Tranquila'},{e:'🙂',l:'Relajada'},{e:'😐',l:'Normal'},{e:'😬',l:'Nerviosa'},{e:'😰',l:'Muy nerviosa'}];
+const RATING_LEVELS=[{e:'😞',l:'Muy flojo'},{e:'😕',l:'Flojo'},{e:'😐',l:'Normal'},{e:'🙂',l:'Bueno'},{e:'🔥',l:'Excelente'}];
 const RPE_LEVELS = ['Reposo total','Muy, muy suave','Muy suave','Suave','Moderado','Algo intenso','Intenso','Muy intenso','Muy, muy intenso','Casi máximo','Esfuerzo máximo'];
 const APP_ICON_DATA_URI = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj48cmVjdCB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgZmlsbD0iIzEwMTExMCIvPjxwb2x5Z29uIHBvaW50cz0iMCwwIDUxMiwwIDUxMiw1MTIiIGZpbGw9IiNjODEwMmUiLz48cG9seWdvbiBwb2ludHM9IjAsMCAwLDUxMiA1MTIsNTEyIiBmaWxsPSIjZjRmMmVhIi8+PGNpcmNsZSBjeD0iMjU2IiBjeT0iMjU2IiByPSIxODAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2Y0ZjJlYSIgc3Ryb2tlLXdpZHRoPSIxMCIvPjwvc3ZnPg==';
 const RTP_STAGES = ['Reposo y tratamiento','Movilidad y fuerza básica','Readaptación física individual','Reintegración al grupo','Alta deportiva completa'];
@@ -941,7 +952,7 @@ function avg(arr){ const a=arr.filter(n=>!isNaN(n)); if(!a.length) return 0; ret
 /* =============================== FIREBASE CONFIG =============================== */
 /* Se actualiza cada vez que se genera una versión nueva del archivo — sirve para confirmar
    rápido, desde Ajustes, si lo que está publicado en GitHub es la última versión o no. */
-const APP_VERSION = "2026-10-10.1";
+const APP_VERSION = "2026-10-30.2";
 const firebaseConfig = {
   apiKey: "AIzaSyBxcxTN2PMGZEdhj1tJcyptwRX86yg2E1w",
   authDomain: "pincha-data.firebaseapp.com",
@@ -1218,6 +1229,13 @@ async function hashPassword(pw){
   const enc = new TextEncoder().encode(pw);
   const buf = await crypto.subtle.digest('SHA-256', enc);
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+// ¿Está completa la PSE (post) de este registro? Los registros viejos (sin flags) cuentan como completos;
+// pero si existe el flag preDone y no hay postDone, es que solo se cargó la previa y falta la PSE.
+function isPostDone(entry){
+  if(!entry) return false;
+  if(entry.postDone!==undefined) return !!entry.postDone;
+  return entry.preDone===undefined;
 }
 function sessionLoad(w){
   const rpeF = Number(w.rpeFisico||0);
@@ -1894,10 +1912,26 @@ function computeAnalysisFromEntry(e){
   areas.forEach(a=>{ if(a.scale>=6) negatives.push(`Molestia en ${a.part} (${a.scale}/10)`); });
   if(e.injured) negatives.push('Reporta lesión activa');
   if(e.kinesio) notes.push('Asistió a kinesiología');
+  const post = e.postPainAreas||[];
+  post.forEach(a=>{ if(a.scale>=4) negatives.push(`Terminó con molestia en ${a.part} (${a.scale}/10)`); else notes.push(`Terminó con molestia leve en ${a.part} (${a.scale}/10)`); });
+  if(e.postPain===false && e.postDone) positives.push('Terminó sin molestias');
+  if(e.isMatch){
+    if(e.matchReady!==undefined){
+      if(Number(e.matchReady)<=2) negatives.push('Llegó con baja disposición para jugar');
+      else if(Number(e.matchReady)>=4) positives.push('Llegó bien dispuesta al partido');
+    }
+    if(Number(e.matchNerves)>=4) negatives.push('Nervios/ansiedad elevados antes del partido');
+    if(e.playedMatch===false) notes.push('No jugó el partido');
+    if(Number(e.matchRating)>=1 && Number(e.matchRating)<=2) negatives.push('Rendimiento percibido bajo en el partido');
+    else if(Number(e.matchRating)>=4) positives.push('Buen rendimiento percibido en el partido');
+  }
   const totalMin = Number(e.ball||0)+Number(e.fitness||0)+Number(e.match||0);
   const load = sessionLoad(e);
   const lvl = loadLevel(load);
-  if(totalMin===0) notes.push('Día sin carga de entrenamiento registrada');
+  if(e.isMatch){
+    if(totalMin===0) notes.push('Sin minutos de juego registrados');
+    else notes.push(`Partido: ${Number(e.match||0)} min · PSE ${Number(e.rpePartido||e.rpePelota||0)} · carga ${load} (${lvl.label})`);
+  } else if(totalMin===0) notes.push('Día sin carga de entrenamiento registrada');
   else if(lvl.label==='Alta' && (fatigue>=4 || soreness>=4)) negatives.push(`Carga de entrenamiento alta (${load}) combinada con fatiga/dolor elevados — riesgo de sobrecarga`);
   else if(lvl.label==='Alta') negatives.push(`Carga de entrenamiento alta (${load})`);
   else notes.push(`Carga de la sesión: ${load} (${lvl.label})`);
@@ -2438,7 +2472,7 @@ function refreshGlobalPseBanner(){
   if(!SESSION || SESSION.role!=='jugadora'){ container.innerHTML=''; return; }
   const today = todayStr();
   const entry = STATE.wellness.find(w=>w.playerId===SESSION.playerId && w.date===today);
-  const postDone = entry ? (entry.postDone!==undefined ? entry.postDone : true) : false;
+  const postDone = entry ? isPostDone(entry) : false;
   const preDone = entry ? (entry.preDone!==undefined ? entry.preDone : true) : false;
   const hayEntrenoHoy = isTrainingOrMatchDay(SESSION.playerId, today);
   let mensaje = null;
@@ -2549,11 +2583,18 @@ function sevColor(sev){ return sev==='Grave'?'var(--red)':sev==='Moderada'?'var(
 function buildAlerts(){
   const alerts=[];
   const today = todayStr();
-  STATE.wellness.filter(w=>w.date===today && w.painAreas && w.painAreas.length).forEach(w=>{
+  STATE.wellness.filter(w=>w.date===today && ((w.painAreas && w.painAreas.length) || (w.postPainAreas && w.postPainAreas.length))).forEach(w=>{
     const p=getPlayer(w.playerId); if(!p) return;
-    w.painAreas.forEach(a=>{
+    (w.painAreas||[]).forEach(a=>{
       alerts.push({
         title: `${p.name} — ${a.part}`,
+        detail: `${a.scale}/10${a.note?` — "${a.note}"`:''}`,
+        color: a.scale>=7?'var(--red)':a.scale>=4?'var(--amber)':'var(--green)'
+      });
+    });
+    (w.postPainAreas||[]).forEach(a=>{
+      alerts.push({
+        title: `${p.name} — ${a.part} (al terminar)`,
         detail: `${a.scale}/10${a.note?` — "${a.note}"`:''}`,
         color: a.scale>=7?'var(--red)':a.scale>=4?'var(--amber)':'var(--green)'
       });
@@ -2717,6 +2758,74 @@ function openOfdModal(pid, existing){
     closeModal(); toast('Evaluación guardada'); render();
   };
 }
+
+function pfMatchCardHTML(){
+  const today = todayStr();
+  const past = STATE.events.filter(e=>e.type==='Partido' && e.date<=today).map(e=>e.date).sort();
+  if(!past.length) return '';
+  const lastDate = past[past.length-1];
+  const diff = Math.round((new Date(today+'T00:00:00')-new Date(lastDate+'T00:00:00'))/86400000);
+  if(diff>7) return '';
+  const evs = STATE.events.filter(e=>e.type==='Partido' && e.date===lastDate);
+  const rows = [];
+  let missingPre = 0, missingPost = 0;
+  STATE.players.forEach(p=>{
+    const cats = playerCategories(p);
+    const ev = evs.find(e=>e.category==='Ambas' || cats.includes(e.category));
+    if(!ev) return;
+    const w = STATE.wellness.find(x=>x.playerId===p.id && x.date===lastDate);
+    const hasPre = !!(w && (w.preDone!==undefined ? w.preDone : true));
+    const hasPost = !!(w && isPostDone(w));
+    if(!hasPre) missingPre++; if(!hasPost) missingPost++;
+    rows.push({p, ev, w, hasPre, hasPost});
+  });
+  if(!rows.length) return '';
+  const withMatch = rows.filter(r=>r.w && r.w.isMatch);
+  const avgOf = (arr)=> arr.length ? (arr.reduce((a,b)=>a+b,0)/arr.length) : null;
+  const ready = avgOf(withMatch.filter(r=>r.w.matchReady!==undefined).map(r=>Number(r.w.matchReady)));
+  const nerves = avgOf(withMatch.filter(r=>r.w.matchNerves!==undefined).map(r=>Number(r.w.matchNerves)));
+  const played = rows.filter(r=>r.w && r.w.playedMatch===true);
+  const mins = avgOf(played.map(r=>Number(r.w.match||0)));
+  const pses = avgOf(played.filter(r=>r.w.rpePartido!==undefined || r.w.rpePelota!==undefined).map(r=>Number(r.w.rpePartido!==undefined ? r.w.rpePartido : r.w.rpePelota)));
+  const lowReady = withMatch.filter(r=>r.w.matchReady!==undefined && Number(r.w.matchReady)<=2);
+  const nervous = withMatch.filter(r=>r.w.matchNerves!==undefined && Number(r.w.matchNerves)>=4);
+  const postPain = rows.filter(r=>r.w && r.w.postPainAreas && r.w.postPainAreas.length);
+  const f1 = n=> n===null ? '—' : n.toFixed(1);
+  const opp = evs.map(e=>`${e.category}${e.opponent?` vs ${e.opponent}`:''}`).join(' · ');
+  return `
+  <div class="card" style="margin-bottom:16px; border:1.5px solid var(--red);">
+    <h3>🥅 Último partido · ${fmtDate(lastDate)}</h3>
+    <div class="section-sub">${opp}. Previa y post del partido, con la información específica de día de juego.</div>
+    <div class="grid-4" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; margin-bottom:14px;">
+      <div class="card" style="margin:0;"><div class="muted" style="font-size:11px;">DISPOSICIÓN PREVIA (1-5)</div><div class="kpi-big">${f1(ready)}</div></div>
+      <div class="card" style="margin:0;"><div class="muted" style="font-size:11px;">NERVIOS PREVIOS (1-5)</div><div class="kpi-big">${f1(nerves)}</div></div>
+      <div class="card" style="margin:0;"><div class="muted" style="font-size:11px;">MIN. JUGADOS (PROM.)</div><div class="kpi-big">${mins===null?'—':Math.round(mins)}</div></div>
+      <div class="card" style="margin:0;"><div class="muted" style="font-size:11px;">PSE PARTIDO (PROM.)</div><div class="kpi-big">${f1(pses)}</div></div>
+    </div>
+    <div class="muted" style="font-size:12.5px; margin-bottom:8px;">Previa cargada: <b>${rows.length-missingPre}/${rows.length}</b> · Post cargado: <b>${rows.length-missingPost}/${rows.length}</b> · Jugaron: <b>${played.length}</b></div>
+    ${lowReady.length ? `<div style="margin-bottom:6px;"><b>🎯 Llegaron con baja disposición:</b> ${lowReady.map(r=>`${r.p.name} (${r.w.matchReady}/5)`).join(', ')}</div>` : ''}
+    ${nervous.length ? `<div style="margin-bottom:6px;"><b>😬 Muy nerviosas antes de jugar:</b> ${nervous.map(r=>`${r.p.name} (${r.w.matchNerves}/5)`).join(', ')}</div>` : ''}
+    ${postPain.length ? `<div style="margin-bottom:6px;"><b>⚠️ Terminaron con molestia:</b> ${postPain.map(r=>`${r.p.name} — ${r.w.postPainAreas.map(a=>`${a.part} ${a.scale}/10`).join(', ')}`).join(' · ')}</div>` : ''}
+    <div style="overflow-x:auto; margin-top:10px;">
+    <table>
+      <thead><tr><th>Jugadora</th><th>Sueño</th><th>Disposición</th><th>Nervios</th><th>Jugó</th><th>Min.</th><th>PSE</th><th>Rend.</th><th>Molestias al terminar</th></tr></thead>
+      <tbody>${rows.map(({p,w,hasPre,hasPost})=>`
+        <tr>
+          <td><b>${p.name}</b></td>
+          <td>${hasPre && w.sleepHours!==undefined ? w.sleepHours+'h' : '<span class="muted">—</span>'}</td>
+          <td>${w && w.matchReady!==undefined ? w.matchReady+'/5' : '<span class="muted">—</span>'}</td>
+          <td>${w && w.matchNerves!==undefined ? w.matchNerves+'/5' : '<span class="muted">—</span>'}</td>
+          <td>${w && w.playedMatch===true ? 'Sí' : (w && w.playedMatch===false ? 'No' : '<span class="muted">—</span>')}</td>
+          <td>${w && w.playedMatch===true ? (w.match||0) : '<span class="muted">—</span>'}</td>
+          <td>${w && w.playedMatch===true ? (w.rpePartido!==undefined ? w.rpePartido : (w.rpePelota!==undefined ? w.rpePelota : '—')) : '<span class="muted">—</span>'}</td>
+          <td>${w && w.matchRating ? w.matchRating+'/5' : '<span class="muted">—</span>'}</td>
+          <td>${w && w.postPainAreas && w.postPainAreas.length ? w.postPainAreas.map(a=>`${a.part} ${a.scale}/10`).join(', ') : (hasPost ? 'Sin molestias' : '<span class="muted">—</span>')}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+    </div>
+  </div>`;
+}
 function viewPfWellness(){
   if(pfWellnessSelectedPlayer && getPlayer(pfWellnessSelectedPlayer)){
     return `
@@ -2735,6 +2844,7 @@ function viewPfWellness(){
     <div class="card"><div class="muted" style="font-size:11px;">PROMEDIO DÍAS CARGADOS (ÚLT. 7)</div><div class="kpi-big">${compliance.avgDaysLogged.toFixed(1)}/7</div></div>
     <div class="card"><div class="muted" style="font-size:11px;">NUNCA CARGARON WELLNESS</div><div class="kpi-big">${compliance.neverLogged.length}</div></div>
   </div>
+  ${pfMatchCardHTML()}
 
   <!-- Vista de escritorio: tabla completa con todo el detalle -->
   <div class="card only-desktop">
@@ -4171,7 +4281,7 @@ function renderAnalysisBody(pid){
     <h3>Molestias y zonas de dolor reportadas</h3>
     <div class="section-sub">Detalle completo de cada zona marcada por la jugadora en su wellness diario, con su nota.</div>
     ${(()=>{
-      const withPain = myWellness.filter(w=>(w.painAreas && w.painAreas.length) || w.injured).slice().reverse();
+      const withPain = myWellness.filter(w=>(w.painAreas && w.painAreas.length) || (w.postPainAreas && w.postPainAreas.length) || w.injured).slice().reverse();
       if(!withPain.length) return '<div class="empty-state">Sin molestias reportadas en el historial.</div>';
       return withPain.map(w=>`
         <div class="injury-row" style="align-items:flex-start; flex-direction:column; gap:8px;">
@@ -4180,11 +4290,11 @@ function renderAnalysisBody(pid){
             ${w.injured? '<span class="badge danger">Reportó lesión activa ese día</span>':''}
           </div>
           ${w.injured && w.injuryDesc? `<div class="muted" style="width:100%; font-style:italic;">"${w.injuryDesc}"</div>`:''}
-          ${(w.painAreas||[]).map(a=>{
+          ${((w.painAreas||[]).map(a=>({...a,_post:false}))).concat((w.postPainAreas||[]).map(a=>({...a,_post:true}))).map(a=>{
             const cls = a.scale>=7?'danger':a.scale>=4?'warn':'ok';
             return `<div style="width:100%; background:var(--bg-raise); border-radius:10px; padding:10px 14px; border-left:3px solid ${a.scale>=7?'var(--red)':a.scale>=4?'var(--amber)':'var(--green)'};">
               <div style="display:flex; align-items:center; justify-content:space-between;">
-                <b>${a.part}</b><span class="badge ${cls}">${a.scale}/10</span>
+                <b>${a.part}${a._post?' <span class="match-chip">al terminar</span>':''}</b><span class="badge ${cls}">${a.scale}/10</span>
               </div>
               ${a.note? `<div class="muted" style="margin-top:4px; font-style:italic;">"${a.note}"</div>` : '<div class="muted" style="margin-top:4px;">Sin nota adicional</div>'}
             </div>`;
@@ -5190,37 +5300,56 @@ function buildBodySVG(parts, viewName){
     <g class="body-group" data-view="${viewName}">${shapes}</g>
   </svg>`;
 }
-function renderPainChips(){
-  const wrap = document.getElementById('pain-chips'); if(!wrap) return;
-  wrap.innerHTML = selectedPainAreas.length ? selectedPainAreas.map((a,idx)=>`<span class="chip">${a.part} · ${a.scale}/10 <button data-removepain="${idx}">✕</button></span>`).join('') : `<span class="muted" style="font-size:12.5px;">Sin zonas seleccionadas — no reportás dolor hoy.</span>`;
-  document.querySelectorAll('[data-removepain]').forEach(btn=>btn.addEventListener('click',()=>{
-    selectedPainAreas.splice(Number(btn.dataset.removepain),1); syncBodyHighlights(); renderPainChips(); document.getElementById('pain-editor').innerHTML='';
+let selectedPostPainAreas = [];
+function painList(ctx){ return ctx==='post' ? selectedPostPainAreas : selectedPainAreas; }
+function painSuffix(ctx){ return ctx==='post' ? '-post' : ''; }
+function renderPainChips(ctx){
+  ctx = ctx || 'pre';
+  const wrap = document.getElementById('pain-chips'+painSuffix(ctx)); if(!wrap) return;
+  const list = painList(ctx);
+  const emptyMsg = ctx==='post' ? 'Sin zonas seleccionadas todavía.' : 'Sin zonas seleccionadas — no reportás dolor hoy.';
+  wrap.innerHTML = list.length ? list.map((a,idx)=>`<span class="chip">${a.part} · ${a.scale}/10 <button data-removepain="${idx}" data-painctx="${ctx}">✕</button></span>`).join('') : `<span class="muted" style="font-size:12.5px;">${emptyMsg}</span>`;
+  wrap.querySelectorAll('[data-removepain]').forEach(btn=>btn.addEventListener('click',()=>{
+    list.splice(Number(btn.dataset.removepain),1); syncBodyHighlights(ctx); renderPainChips(ctx);
+    const ed = document.getElementById('pain-editor'+painSuffix(ctx)); if(ed) ed.innerHTML='';
   }));
 }
-function syncBodyHighlights(){
-  document.querySelectorAll('.body-part').forEach(el=>{
-    const part = el.dataset.part; const found = selectedPainAreas.find(a=>a.part===part);
+function syncBodyHighlights(ctx){
+  ctx = ctx || 'pre';
+  const list = painList(ctx);
+  const root = document.querySelector(`[data-painctx="${ctx}"].body-diagram-wrap`) || document;
+  root.querySelectorAll('.body-part').forEach(el=>{
+    const part = el.dataset.part; const found = list.find(a=>a.part===part);
     el.classList.toggle('selected', !!found); el.classList.toggle('severe', !!found && found.scale>=7);
   });
 }
-function openPainEditor(part){
-  const editor = document.getElementById('pain-editor');
-  let entry = selectedPainAreas.find(a=>a.part===part);
+function openPainEditor(part, ctx){
+  ctx = ctx || 'pre';
+  const list = painList(ctx);
+  const editor = document.getElementById('pain-editor'+painSuffix(ctx));
+  let entry = list.find(a=>a.part===part);
   const yaExistia = !!entry;
-  if(!entry){ entry = {part, scale:5, note:''}; selectedPainAreas.push(entry); }
+  if(!entry){ entry = {part, scale:5, note:''}; list.push(entry); }
+  const sfx = painSuffix(ctx);
   editor.innerHTML = `
   <div class="card" style="background:var(--bg-raise);"><h3>${part}</h3>
     ${yaExistia? `<div class="section-sub" style="color:var(--green); font-weight:700;">✓ Ya habías marcado esta zona — podés ajustarla si cambió, o dejarla así.</div>` : ''}
-    <div class="pain-slider-wrap"><input type="range" min="0" max="10" id="pain-scale-input" value="${entry.scale}"><div class="pain-scale-num" id="pain-scale-display">${entry.scale}</div></div>
-    <div class="field-wrap" style="margin-top:10px;"><label class="field">¿Cómo fue / cuándo aparece?</label><textarea id="pain-note-input" placeholder="Ej: aparece al saltar, punzante, desde el entrenamiento de ayer...">${entry.note}</textarea></div>
-    <button class="btn sm" id="pain-save-btn">${yaExistia?'Actualizar zona':'Guardar zona'}</button>
+    <div class="pain-slider-wrap"><input type="range" min="0" max="10" id="pain-scale-input${sfx}" value="${entry.scale}"><div class="pain-scale-num" id="pain-scale-display${sfx}">${entry.scale}</div></div>
+    <div class="field-wrap" style="margin-top:10px;"><label class="field">¿Cómo fue / cuándo aparece?</label><textarea id="pain-note-input${sfx}" placeholder="Ej: aparece al saltar, punzante, desde el entrenamiento de ayer...">${entry.note}</textarea></div>
+    <button class="btn sm" id="pain-save-btn${sfx}">${yaExistia?'Actualizar zona':'Guardar zona'}</button>
   </div>`;
-  const range = document.getElementById('pain-scale-input');
-  range.addEventListener('input',()=>{ document.getElementById('pain-scale-display').textContent = range.value; });
-  document.getElementById('pain-save-btn').addEventListener('click',()=>{
-    entry.scale = Number(range.value); entry.note = document.getElementById('pain-note-input').value;
-    syncBodyHighlights(); renderPainChips(); editor.innerHTML=''; toast(yaExistia?'Zona actualizada':'Zona registrada');
+  const range = document.getElementById('pain-scale-input'+sfx);
+  range.addEventListener('input',()=>{ document.getElementById('pain-scale-display'+sfx).textContent = range.value; });
+  document.getElementById('pain-save-btn'+sfx).addEventListener('click',()=>{
+    entry.scale = Number(range.value); entry.note = document.getElementById('pain-note-input'+sfx).value;
+    syncBodyHighlights(ctx); renderPainChips(ctx); editor.innerHTML=''; toast(yaExistia?'Zona actualizada':'Zona registrada');
   });
+}
+function bodyDiagramHTML(ctx){
+  return `<div class="body-diagram-wrap" data-painctx="${ctx}">
+      <div class="body-svg-box"><span>Vista frontal</span>${buildBodySVG(BODY_PARTS_FRONT,'front')}</div>
+      <div class="body-svg-box"><span>Vista posterior</span>${buildBodySVG(BODY_PARTS_BACK,'back')}</div>
+    </div>`;
 }
 
 /* =============================== WELLNESS (Jugadora) =============================== */
@@ -5265,7 +5394,7 @@ function missingPseDays(playerId){
     if(!isTrainingOrMatchDay(playerId, ds)) continue;
     const entry = STATE.wellness.find(w=>w.playerId===playerId && w.date===ds);
     if(!entry) continue; // ese día ya se cuenta como wellness faltante por completo, no como PSE puntual
-    const postDone = entry.postDone!==undefined ? entry.postDone : true;
+    const postDone = isPostDone(entry);
     if(!postDone) out.push(ds);
   }
   return out;
@@ -5273,9 +5402,16 @@ function missingPseDays(playerId){
 function emojiRow(name, levels, current){
   return `<div class="emoji-row" data-scale="${name}">${levels.map((lv,i)=>`<button type="button" class="emoji-btn ${current===i+1?'active':''}" data-val="${i+1}"><div class="emoji-btn-icon">${lv.e}</div><div class="emoji-btn-label">${lv.l}</div></button>`).join('')}</div>`;
 }
+function draftLoad(){
+  const p = activePlayer();
+  if(p && isMatchDay(p.id, wellnessTargetDate||todayStr())){
+    return sessionLoad({ball:0, fitness:0, match: wellnessDraft.playedMatch===false ? 0 : wellnessDraft.match, rpePelota: wellnessDraft.rpePartido});
+  }
+  return sessionLoad(wellnessDraft);
+}
 function updateLoadBadge(){
   const badge = document.getElementById('w-total-badge'); const loadVal = document.getElementById('w-load-val'); if(!badge || !loadVal) return;
-  const load = sessionLoad(wellnessDraft);
+  const load = draftLoad();
   loadVal.textContent = load;
   const lvl = loadLevel(load);
   badge.textContent = lvl.label; badge.className = 'badge '+lvl.cls;
@@ -5297,16 +5433,20 @@ function viewWellness(){
   const missingPse = missingPseDays(p.id);
   // Compatibilidad con registros viejos (sin los flags preDone/postDone): se consideran completos los dos.
   const preDone = entry ? (entry.preDone!==undefined ? entry.preDone : true) : false;
-  const postDone = entry ? (entry.postDone!==undefined ? entry.postDone : true) : false;
+  const postDone = entry ? isPostDone(entry) : false;
   wellnessDraft = entry ? {
     sleepHours:Number(entry.sleepHours), fatigue:Number(entry.fatigue), soreness:Number(entry.soreness), mood:Number(entry.mood),
     ball:Number(entry.ball||0), fitness:Number(entry.fitness||0), match:Number(entry.match||0),
     rpeFisico: entry.rpeFisico!==undefined ? Number(entry.rpeFisico) : 5, rpePelota: entry.rpePelota!==undefined ? Number(entry.rpePelota) : 5,
     cyclePhase: entry.cyclePhase, injured: entry.injured, kinesio: entry.kinesio, injuryDesc: entry.injuryDesc||'', dayCategory: entry.dayCategory || myCats[0] || '',
-    playedMatch: entry.playedMatch!==undefined ? entry.playedMatch : null
-  } : {sleepHours:7, fatigue:3, soreness:2, mood:4, ball:0, fitness:0, match:0, rpeFisico:5, rpePelota:5, cyclePhase:CYCLE_PHASES[4], injured:false, kinesio:false, injuryDesc:'', dayCategory: myCats[0] || '', playedMatch: null};
+    playedMatch: entry.playedMatch!==undefined ? entry.playedMatch : null,
+    matchReady: entry.matchReady!==undefined ? Number(entry.matchReady) : 3, matchNerves: entry.matchNerves!==undefined ? Number(entry.matchNerves) : 2,
+    matchRating: entry.matchRating!==undefined ? Number(entry.matchRating) : 3, rpePartido: entry.rpePartido!==undefined ? Number(entry.rpePartido) : (entry.isMatch && entry.rpePelota!==undefined ? Number(entry.rpePelota) : 5),
+    postPain: entry.postPain!==undefined ? !!entry.postPain : false
+  } : {sleepHours:7, fatigue:3, soreness:2, mood:4, ball:0, fitness:0, match:0, rpeFisico:5, rpePelota:5, cyclePhase:CYCLE_PHASES[4], injured:false, kinesio:false, injuryDesc:'', dayCategory: myCats[0] || '', playedMatch: null, matchReady:3, matchNerves:2, matchRating:3, rpePartido:5, postPain:false};
   rpeTouched = { fisico: !!(entry && entry.rpeFisico!==undefined), pelota: !!(entry && entry.rpePelota!==undefined) };
   selectedPainAreas = entry ? JSON.parse(JSON.stringify(entry.painAreas||[])) : [];
+  selectedPostPainAreas = entry ? JSON.parse(JSON.stringify(entry.postPainAreas||[])) : [];
 
   const banners = `
   ${missingDays.length && isToday ? `
@@ -5356,7 +5496,7 @@ function viewWellness(){
     return banners + (postDone ? '' : `
     <div class="card" style="margin-bottom:16px; border:1.5px solid var(--green); background:rgba(95,167,119,0.08);">
       <h3>✅ Ya completaste tu check-in de antes de la sesión</h3>
-      <div class="section-sub">Ahora te falta cargar cómo te sentiste DESPUÉS de entrenar (PSE y minutos).</div>
+      <div class="section-sub">${isMatchDay(p.id, targetDate) ? 'Ahora te falta cargar cómo te fue DESPUÉS del partido (minutos, PSE y molestias).' : 'Ahora te falta cargar cómo te sentiste DESPUÉS de entrenar (PSE, minutos y molestias).'}</div>
     </div>`)
       + wellnessPostFormHTML(p, targetDate, isToday, myCats)
       + `<button class="btn save-wellness-btn" id="btn-save-wellness-post">💾 Guardar PSE de después de la sesión</button>`;
@@ -5372,16 +5512,56 @@ function viewWellness(){
     <button class="btn secondary" id="btn-edit-post">✏️ Editar PSE de después</button>
   </div>`;
 }
-function wellnessPreFormHTML(p, targetDate, isToday, entry){
-  const lastInjury = !entry ? getLastInjuryReport(p.id, targetDate) : null;
+function matchEventFor(playerId, dateStr){
+  const p = getPlayer(playerId); if(!p) return null;
+  const myCats = playerCategories(p);
+  return STATE.events.find(e=> e.date===dateStr && e.type==='Partido' && (e.category==='Ambas' || myCats.includes(e.category))) || null;
+}
+function minutesControlHTML(key, val, max, color){
+  return `<input type="range" min="0" max="${max}" step="1" id="w-${key}" value="${val}" style="accent-color:${color};">
+    <div class="min-stepper">
+      <button type="button" class="min-btn" data-minkey="${key}" data-delta="-5">−5</button>
+      <button type="button" class="min-btn" data-minkey="${key}" data-delta="-1">−1</button>
+      <input type="number" inputmode="numeric" min="0" max="${max}" step="1" id="w-${key}-num" value="${val}" aria-label="Minutos">
+      <button type="button" class="min-btn" data-minkey="${key}" data-delta="1">+1</button>
+      <button type="button" class="min-btn" data-minkey="${key}" data-delta="5">+5</button>
+    </div>`;
+}
+function postPainCardHTML(isMatch, isToday){
+  const q = isMatch ? '¿Terminaste el partido con alguna molestia o dolor?' : '¿Terminaste el entrenamiento o la pelota con alguna molestia o dolor?';
   return `
   <div class="card" style="margin-bottom:16px;">
-    <h3>¿Cómo llegaste ${isToday?'hoy':`el ${fmtDate(targetDate)}`}, ${p.name.split(' ')[0]}? — ${fmtDate(targetDate)}</h3>
-    <div class="section-sub">Completá esto ANTES de entrenar.</div>
-    <div class="field-wrap"><label class="field">🌙 Horas de sueño: <span id="w-sleep-display">${wellnessDraft.sleepHours}</span>h</label><input type="range" min="0" max="12" step="0.5" id="w-sleep" value="${wellnessDraft.sleepHours}"></div>
+    <h3>Molestias al terminar</h3>
+    <div class="section-sub">${q}</div>
+    <div style="display:flex; gap:10px;">
+      <button type="button" class="btn ${wellnessDraft.postPain?'secondary':''} sm" id="w-postpain-no" style="flex:1;">No, terminé bien</button>
+      <button type="button" class="btn ${wellnessDraft.postPain?'':'secondary'} sm" id="w-postpain-yes" style="flex:1;">Sí, con molestia</button>
+    </div>
+    <div id="post-pain-wrap" style="display:${wellnessDraft.postPain?'block':'none'}; margin-top:14px;">
+      <div class="section-sub">Tocá la zona y ajustá la escala de dolor.</div>
+      ${bodyDiagramHTML('post')}
+      <div id="pain-chips-post" style="margin-top:14px;"></div>
+      <div id="pain-editor-post" style="margin-top:10px;"></div>
+    </div>
+  </div>`;
+}
+function wellnessPreFormHTML(p, targetDate, isToday, entry){
+  const lastInjury = !entry ? getLastInjuryReport(p.id, targetDate) : null;
+  const esPartido = isMatchDay(p.id, targetDate);
+  const matchEv = esPartido ? matchEventFor(p.id, targetDate) : null;
+  return `
+  <div class="card" style="margin-bottom:16px;">
+    ${esPartido ? `<div class="match-banner"><span class="mb-ic">🥅</span><span>Día de partido${matchEv && matchEv.opponent ? ` · vs ${matchEv.opponent}` : ''}${matchEv && matchEv.venue ? ` (${matchEv.venue})` : ''}</span></div>` : ''}
+    <h3>${esPartido ? `Previa del partido` : `¿Cómo llegaste ${isToday?'hoy':`el ${fmtDate(targetDate)}`}, ${p.name.split(' ')[0]}?`} — ${fmtDate(targetDate)}</h3>
+    <div class="section-sub">${esPartido ? 'Completá esto ANTES de jugar: cómo llegás físicamente y mentalmente al partido.' : 'Completá esto ANTES de entrenar.'}</div>
+    <div class="field-wrap"><label class="field">🌙 ${esPartido?'Horas de sueño de anoche':'Horas de sueño'}: <span id="w-sleep-display">${wellnessDraft.sleepHours}</span>h</label><input type="range" min="0" max="12" step="0.5" id="w-sleep" value="${wellnessDraft.sleepHours}"></div>
     <div class="field-wrap"><label class="field">Fatiga percibida</label>${emojiRow('fatigue',FATIGUE_LEVELS,wellnessDraft.fatigue)}</div>
     <div class="field-wrap"><label class="field">Dolor muscular general</label>${emojiRow('soreness',SORENESS_LEVELS,wellnessDraft.soreness)}</div>
     <div class="field-wrap"><label class="field">Estado de ánimo</label>${emojiRow('mood',MOOD_LEVELS,wellnessDraft.mood)}</div>
+    ${esPartido ? `
+    <div class="field-wrap"><label class="field">🎯 ¿Qué tan lista te sentís para jugar?</label>${emojiRow('matchReady',READY_LEVELS,wellnessDraft.matchReady)}</div>
+    <div class="field-wrap"><label class="field">😬 Nervios / ansiedad antes del partido</label>${emojiRow('matchNerves',NERVES_LEVELS,wellnessDraft.matchNerves)}</div>
+` : ''}
     <div class="field-wrap"><label class="field">Fase del ciclo menstrual</label>
       <div class="cycle-phase-grid">${CYCLE_PHASE_INFO.map(cp=>`
         <button type="button" class="cycle-phase-btn ${wellnessDraft.cyclePhase===cp.phase?'active':''}" data-cyclephase="${cp.phase}">
@@ -5410,48 +5590,69 @@ function wellnessPreFormHTML(p, targetDate, isToday, entry){
   <div class="card" style="margin-bottom:16px;">
     <h3>¿Dónde sentís molestias ${isToday?'hoy':'ese día'}?</h3>
     <div class="section-sub">Tocá una zona — el nombre ya aparece escrito sobre el cuerpo — y ajustá la escala de dolor</div>
-    <div class="body-diagram-wrap">
-      <div class="body-svg-box"><span>Vista frontal</span>${buildBodySVG(BODY_PARTS_FRONT,'front')}</div>
-      <div class="body-svg-box"><span>Vista posterior</span>${buildBodySVG(BODY_PARTS_BACK,'back')}</div>
-    </div>
+    ${bodyDiagramHTML('pre')}
     <div id="pain-chips" style="margin-top:14px;"></div>
     <div id="pain-editor" style="margin-top:10px;"></div>
   </div>`;
 }
 function wellnessPostFormHTML(p, targetDate, isToday, myCats){
   const esDiaDePartido = isMatchDay(p.id, targetDate);
-  return `
+  const catSel = myCats.length>1? `<div class="field-wrap"><label class="field">¿Con qué categoría ${esDiaDePartido?'jugaste':'entrenaste/jugaste'}?</label><select id="w-daycategory">${myCats.map(c=>`<option ${wellnessDraft.dayCategory===c?'selected':''}>${c}</option>`).join('')}</select></div>` : '';
+  if(esDiaDePartido){
+    const played = wellnessDraft.playedMatch;
+    const matchEv = matchEventFor(p.id, targetDate);
+    return `
   <div class="card" style="margin-bottom:16px;">
-    <h3>Carga de entrenamiento de ${isToday?'hoy':'ese día'}</h3>
-    <div class="section-sub">Completá esto DESPUÉS de entrenar.</div>
-    ${myCats.length>1? `<div class="field-wrap"><label class="field">¿Con qué categoría entrenaste/jugaste?</label><select id="w-daycategory">${myCats.map(c=>`<option ${wellnessDraft.dayCategory===c?'selected':''}>${c}</option>`).join('')}</select></div>` : ''}
-    ${esDiaDePartido? `
+    <div class="match-banner"><span class="mb-ic">🥅</span><span>Día de partido${matchEv && matchEv.opponent ? ` · vs ${matchEv.opponent}` : ''}</span></div>
+    <h3>Después del partido</h3>
+    <div class="section-sub">Completá esto DESPUÉS de jugar.</div>
+    ${catSel}
     <div class="field-wrap">
       <label class="field">¿Jugaste este partido?</label>
       <div style="display:flex; gap:10px;">
-        <button type="button" class="btn ${wellnessDraft.playedMatch===true?'':'secondary'} sm" id="w-played-yes" style="flex:1;">Sí, jugué</button>
-        <button type="button" class="btn ${wellnessDraft.playedMatch===false?'':'secondary'} sm" id="w-played-no" style="flex:1;">No jugué</button>
+        <button type="button" class="btn ${played===true?'':'secondary'} sm" id="w-played-yes" style="flex:1;">Sí, jugué</button>
+        <button type="button" class="btn ${played===false?'':'secondary'} sm" id="w-played-no" style="flex:1;">No jugué</button>
       </div>
-    </div>` : ''}
+    </div>
+    <div id="match-played-wrap" style="display:${played===false?'none':'block'};">
+      <div class="load-row" data-type="match">
+        <div class="load-icon" style="background:rgba(200,16,46,0.18); color:var(--red);">🥅</div>
+        <div class="load-body">
+          <div class="load-top"><span class="load-name">Minutos jugados</span><span class="load-num" id="w-match-val">${wellnessDraft.match} min</span></div>
+          ${minutesControlHTML('match', wellnessDraft.match, 90, 'var(--red)')}
+        </div>
+      </div>
+      <div class="field-wrap" style="margin-top:14px;">
+        <div style="display:flex; align-items:baseline; justify-content:space-between;">
+          <span class="load-name">💥 Esfuerzo del partido (PSE)</span>
+          <span><span class="pain-scale-num" id="w-rpe-partido-display" style="font-size:24px;">${wellnessDraft.rpePartido}</span> <span class="muted" id="w-rpe-partido-label" style="font-size:12px;">${RPE_LEVELS[wellnessDraft.rpePartido]}</span></span>
+        </div>
+        <input type="range" min="0" max="10" step="1" id="w-rpe-partido" value="${wellnessDraft.rpePartido}" style="accent-color:var(--red); margin-top:8px;">
+        <div class="section-sub" style="margin-top:6px;">Escala de Borg (0 a 10) pensando en todo el partido, físico y pelota juntos.</div>
+      </div>
+      <div class="field-wrap"><label class="field">⭐ ¿Cómo sentís que rendiste?</label>${emojiRow('matchRating',RATING_LEVELS,wellnessDraft.matchRating)}</div>
+      <div class="load-total"><span class="muted">Carga del partido: <b id="w-load-val" style="color:var(--white); font-family:var(--font-mono);">${sessionLoad({ball:0,fitness:0,match:wellnessDraft.match,rpePelota:wellnessDraft.rpePartido})}</b></span><span class="badge" id="w-total-badge"></span></div>
+    </div>
+  </div>
+  ${postPainCardHTML(true, isToday)}`;
+  }
+  return `
+  <div class="card" style="margin-bottom:16px;">
+    <h3>Carga de entrenamiento de ${isToday?'hoy':'ese día'}</h3>
+    <div class="section-sub">Completá esto DESPUÉS de entrenar. Podés ajustar los minutos de a 1.</div>
+    ${catSel}
     <div class="load-row" data-type="ball">
       <div class="load-icon" style="background:rgba(95,140,167,0.18); color:var(--blue);">🤾</div>
       <div class="load-body">
         <div class="load-top"><span class="load-name">Pelota</span><span class="load-num" id="w-ball-val">${wellnessDraft.ball} min</span></div>
-        <input type="range" min="0" max="180" step="10" id="w-ball" value="${wellnessDraft.ball}" style="accent-color:var(--blue);">
+        ${minutesControlHTML('ball', wellnessDraft.ball, 180, 'var(--blue)')}
       </div>
     </div>
     <div class="load-row" data-type="fitness">
       <div class="load-icon" style="background:rgba(227,168,87,0.18); color:var(--amber);">🏋️</div>
       <div class="load-body">
         <div class="load-top"><span class="load-name">Físico</span><span class="load-num" id="w-fitness-val">${wellnessDraft.fitness} min</span></div>
-        <input type="range" min="0" max="180" step="10" id="w-fitness" value="${wellnessDraft.fitness}" style="accent-color:var(--amber);">
-      </div>
-    </div>
-    <div class="load-row" data-type="match">
-      <div class="load-icon" style="background:rgba(200,16,46,0.18); color:var(--red);">🥅</div>
-      <div class="load-body">
-        <div class="load-top"><span class="load-name">Partido</span><span class="load-num" id="w-match-val">${wellnessDraft.match} min</span></div>
-        <input type="range" min="0" max="120" step="10" id="w-match" value="${wellnessDraft.match}" style="accent-color:var(--red);">
+        ${minutesControlHTML('fitness', wellnessDraft.fitness, 180, 'var(--amber)')}
       </div>
     </div>
     <div class="load-total"><span class="muted">Minutos totales: <b id="w-total-val" style="color:var(--white); font-family:var(--font-mono);">${wellnessDraft.ball+wellnessDraft.fitness+wellnessDraft.match} min</b></span></div>
@@ -5473,8 +5674,9 @@ function wellnessPostFormHTML(p, targetDate, isToday, myCats){
       </div>
       <input type="range" min="0" max="10" step="1" id="w-rpe-pelota" value="${wellnessDraft.rpePelota}" style="accent-color:var(--blue); margin-top:8px;">
     </div>
-    <div class="load-total"><span class="muted">Carga total de la sesión: <b id="w-load-val" style="color:var(--white); font-family:var(--font-mono);">${sessionLoad({...wellnessDraft})}</b></span><span class="badge" id="w-total-badge"></span></div>
-  </div>`;
+    <div class="load-total"><span class="muted">Carga total de la sesión: <b id="w-load-val" style="color:var(--white); font-family:var(--font-mono);">${sessionLoad(wellnessDraft)}</b></span><span class="badge" id="w-total-badge"></span></div>
+  </div>
+  ${postPainCardHTML(false, isToday)}`;
 }
 function showAnalysisModal(rec){
   const modal=document.getElementById('modal-root');
@@ -5728,8 +5930,23 @@ function afterRender(){
     });
   }
   if(currentView==='wellness'){
-    document.querySelectorAll('.body-part').forEach(el=>el.addEventListener('click',()=>openPainEditor(el.dataset.part)));
-    if(document.getElementById('pain-chips')){ syncBodyHighlights(); renderPainChips(); }
+    document.querySelectorAll('.body-part').forEach(el=>el.addEventListener('click',()=>{
+      const box = el.closest('[data-painctx]');
+      openPainEditor(el.dataset.part, box ? box.dataset.painctx : 'pre');
+    }));
+    if(document.getElementById('pain-chips')){ syncBodyHighlights('pre'); renderPainChips('pre'); }
+    if(document.getElementById('pain-chips-post')){ syncBodyHighlights('post'); renderPainChips('post'); }
+    const postPainYes = document.getElementById('w-postpain-yes');
+    const postPainNo = document.getElementById('w-postpain-no');
+    if(postPainYes && postPainNo){
+      const setPostPain = (v)=>{
+        wellnessDraft.postPain = v;
+        document.getElementById('post-pain-wrap').style.display = v ? 'block' : 'none';
+        postPainYes.classList.toggle('secondary', !v); postPainNo.classList.toggle('secondary', v);
+      };
+      postPainYes.addEventListener('click', ()=>setPostPain(true));
+      postPainNo.addEventListener('click', ()=>setPostPain(false));
+    }
     const sleepInput = document.getElementById('w-sleep');
     if(sleepInput) sleepInput.addEventListener('input', e=>{ wellnessDraft.sleepHours=Number(e.target.value); document.getElementById('w-sleep-display').textContent=e.target.value; });
     document.querySelectorAll('.emoji-btn').forEach(btn=>btn.addEventListener('click',()=>{
@@ -5770,21 +5987,44 @@ function afterRender(){
       fillInjuryFields(true, '');
       document.getElementById('w-injury-desc').focus();
     });
+    function setMinutes(k, raw){
+      const slider = document.getElementById('w-'+k); const num = document.getElementById('w-'+k+'-num');
+      const max = slider ? Number(slider.max) : 180;
+      let v = Math.round(Number(raw)); if(isNaN(v) || v<0) v = 0; if(v>max) v = max;
+      wellnessDraft[k] = v;
+      if(slider) slider.value = v;
+      if(num && document.activeElement!==num) num.value = v;
+      const lbl = document.getElementById('w-'+k+'-val'); if(lbl) lbl.textContent = v+' min';
+      const tot = document.getElementById('w-total-val'); if(tot) tot.textContent = (wellnessDraft.ball+wellnessDraft.fitness+wellnessDraft.match)+' min';
+      updateLoadBadge();
+    }
     ['ball','fitness','match'].forEach(k=>{
       const input=document.getElementById('w-'+k);
       if(!input) return;
-      input.addEventListener('input',()=>{
-        wellnessDraft[k]=Number(input.value);
-        document.getElementById('w-'+k+'-val').textContent=input.value+' min';
-        document.getElementById('w-total-val').textContent=(wellnessDraft.ball+wellnessDraft.fitness+wellnessDraft.match)+' min';
-        updateLoadBadge();
-      });
+      input.addEventListener('input',()=>setMinutes(k, input.value));
+      const num=document.getElementById('w-'+k+'-num');
+      if(num){
+        num.addEventListener('input',()=>{ if(num.value!=='') setMinutes(k, num.value); });
+        num.addEventListener('blur',()=>{ num.value = wellnessDraft[k]; });
+      }
+    });
+    document.querySelectorAll('.min-btn').forEach(btn=>btn.addEventListener('click',()=>{
+      const k = btn.dataset.minkey;
+      setMinutes(k, wellnessDraft[k] + Number(btn.dataset.delta));
+    }));
+    const rpePartidoInput = document.getElementById('w-rpe-partido');
+    if(rpePartidoInput) rpePartidoInput.addEventListener('input', e=>{
+      wellnessDraft.rpePartido = Number(e.target.value);
+      document.getElementById('w-rpe-partido-display').textContent = e.target.value;
+      document.getElementById('w-rpe-partido-label').textContent = RPE_LEVELS[Number(e.target.value)];
+      updateLoadBadge();
     });
     const playedYesBtn = document.getElementById('w-played-yes');
     const playedNoBtn = document.getElementById('w-played-no');
     if(playedYesBtn && playedNoBtn){
-      playedYesBtn.addEventListener('click', ()=>{ wellnessDraft.playedMatch = true; playedYesBtn.classList.remove('secondary'); playedNoBtn.classList.add('secondary'); });
-      playedNoBtn.addEventListener('click', ()=>{ wellnessDraft.playedMatch = false; playedNoBtn.classList.remove('secondary'); playedYesBtn.classList.add('secondary'); });
+      const wrapPlayed = document.getElementById('match-played-wrap');
+      playedYesBtn.addEventListener('click', ()=>{ wellnessDraft.playedMatch = true; playedYesBtn.classList.remove('secondary'); playedNoBtn.classList.add('secondary'); if(wrapPlayed) wrapPlayed.style.display='block'; updateLoadBadge(); });
+      playedNoBtn.addEventListener('click', ()=>{ wellnessDraft.playedMatch = false; playedNoBtn.classList.remove('secondary'); playedYesBtn.classList.add('secondary'); if(wrapPlayed) wrapPlayed.style.display='none'; updateLoadBadge(); });
     }
     const rpeFisicoInput = document.getElementById('w-rpe-fisico');
     if(rpeFisicoInput) rpeFisicoInput.addEventListener('input', e=>{
@@ -5802,7 +6042,7 @@ function afterRender(){
       document.getElementById('w-rpe-pelota-label').textContent = RPE_LEVELS[Number(e.target.value)];
       updateLoadBadge();
     });
-    if(rpeFisicoInput || rpePelotaInput) updateLoadBadge();
+    if(rpeFisicoInput || rpePelotaInput || rpePartidoInput) updateLoadBadge();
     function buildPreFields(){
       const isInjured = document.getElementById('w-injured').value==='si';
       return {
@@ -5810,17 +6050,36 @@ function afterRender(){
         cyclePhase: wellnessDraft.cyclePhase,
         injured: isInjured, kinesio: isInjured ? (document.getElementById('w-kine').value==='si') : false,
         injuryDesc: isInjured ? document.getElementById('w-injury-desc').value.trim() : '',
-        painAreas: selectedPainAreas
+        painAreas: selectedPainAreas,
+        ...(isMatchDay(activePlayer().id, wellnessTargetDate||todayStr()) ? {
+          isMatch: true, matchReady: wellnessDraft.matchReady, matchNerves: wellnessDraft.matchNerves
+        } : {})
       };
     }
     function buildPostFields(){
       const p = activePlayer();
       const myCats = playerCategories(p);
       const dayCategoryEl = document.getElementById('w-daycategory');
-      return {
-        ball: wellnessDraft.ball, fitness: wellnessDraft.fitness, match: wellnessDraft.match,
-        rpeFisico: wellnessDraft.rpeFisico, rpePelota: wellnessDraft.rpePelota,
+      const base = {
         dayCategory: dayCategoryEl ? dayCategoryEl.value : (myCats[0] || ''),
+        postPain: !!wellnessDraft.postPain,
+        postPainAreas: wellnessDraft.postPain ? selectedPostPainAreas : []
+      };
+      if(isMatchDay(p.id, wellnessTargetDate||todayStr())){
+        // Día de partido: un único PSE (sin separar pelota y físico). Se guarda como rpePelota
+        // para que la carga (PSE × minutos) y el ACWR sigan funcionando igual.
+        const played = wellnessDraft.playedMatch===true;
+        return {
+          ...base, isMatch: true, playedMatch: wellnessDraft.playedMatch,
+          ball: 0, fitness: 0, match: played ? wellnessDraft.match : 0,
+          rpePartido: played ? wellnessDraft.rpePartido : 0,
+          matchRating: played ? wellnessDraft.matchRating : null,
+          ...(played ? { rpePelota: wellnessDraft.rpePartido } : {})
+        };
+      }
+      return {
+        ...base, ball: wellnessDraft.ball, fitness: wellnessDraft.fitness, match: wellnessDraft.match,
+        rpeFisico: wellnessDraft.rpeFisico, rpePelota: wellnessDraft.rpePelota,
         playedMatch: wellnessDraft.playedMatch
       };
     }
@@ -5857,6 +6116,7 @@ function afterRender(){
         return null;
       }
       }
+      if(fields.preDone && entryData.postDone===undefined) entryData.postDone = false;
       const ok = await saveWellnessEntry(entryData);
       if(!ok){
         toast('⚠️ No se pudo guardar — revisá tu conexión a internet e intentá de nuevo. Todavía no se perdió lo que cargaste, solo tocá el botón otra vez.');
@@ -5874,8 +6134,16 @@ function afterRender(){
       toast('Wellness de antes de la sesión guardado. ¡No te olvides de cargar la PSE después de entrenar!');
       render();
     });
+    function matchAnswerMissing(){
+      const pl = activePlayer();
+      if(isMatchDay(pl.id, wellnessTargetDate||todayStr()) && wellnessDraft.playedMatch===null){
+        toast('Indicá si jugaste el partido (Sí o No)'); return true;
+      }
+      return false;
+    }
     const btnPost = document.getElementById('btn-save-wellness-post');
     if(btnPost) btnPost.addEventListener('click', async ()=>{
+      if(matchAnswerMissing()) return;
       const entryData = await persistWellness({...buildPostFields(), postDone:true});
       if(!entryData){ return; }
       wellnessForceEdit = null; wellnessVoluntaryToday = false;
@@ -5885,6 +6153,7 @@ function afterRender(){
     });
     const btnFull = document.getElementById('btn-save-wellness-full');
     if(btnFull) btnFull.addEventListener('click', async ()=>{
+      if(matchAnswerMissing()) return;
       const entryData = await persistWellness({...buildPreFields(), ...buildPostFields(), preDone:true, postDone:true});
       if(!entryData){ return; }
       const computed = computeAnalysisFromEntry(entryData);
