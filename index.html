@@ -869,6 +869,7 @@ const PF_NAV = [
   {view:'roster', icon:'◉', label:'Jugadoras y testeos'},
   {view:'pf-wellness', icon:'◆', label:'Wellness'},
   {view:'injuries', icon:'✚', label:'Lesiones'},
+  {view:'match-history', icon:'🥅', label:'Historial de partidos'},
   {view:'ofd', icon:'🎥', label:'OFD'},
   {view:'planning', icon:'📋', label:'Planificación'},
   {view:'calendar', icon:'📅', label:'Calendario'},
@@ -898,6 +899,7 @@ const VIEW_TITLES = {
   notifications:['Notificaciones','Recordatorios para el plantel'],
   planning:['Planificación','Biblioteca de ejercicios y plan semanal'],
   wellness:['Wellness diario','Carga percibida, ciclo, entrenamiento y molestias de hoy'],
+  'match-history':['Historial de partidos','Wellness y PSE de cada partido, para comparar en el tiempo'],
   'my-profile':['Mi Perfil','Tu información básica'],
   'my-tests':['Mis testeos','Tu evolución física a lo largo de la temporada'],
   'my-injury':['Mi estado físico','Tu historial clínico y kinesiológico'],
@@ -952,7 +954,7 @@ function avg(arr){ const a=arr.filter(n=>!isNaN(n)); if(!a.length) return 0; ret
 /* =============================== FIREBASE CONFIG =============================== */
 /* Se actualiza cada vez que se genera una versión nueva del archivo — sirve para confirmar
    rápido, desde Ajustes, si lo que está publicado en GitHub es la última versión o no. */
-const APP_VERSION = "2026-10-30.2";
+const APP_VERSION = "2026-11-01.3";
 const firebaseConfig = {
   apiKey: "AIzaSyBxcxTN2PMGZEdhj1tJcyptwRX86yg2E1w",
   authDomain: "pincha-data.firebaseapp.com",
@@ -2514,6 +2516,7 @@ function render(){
   else if(currentView==='calendar') root.innerHTML = viewCalendar();
   else if(currentView==='planning') root.innerHTML = viewPlanning();
   else if(currentView==='wellness') root.innerHTML = viewWellness();
+  else if(currentView==='match-history') root.innerHTML = viewMatchHistory();
   else if(currentView==='my-profile') root.innerHTML = playerHeaderCardHTML(SESSION.playerId);
   else if(currentView==='my-tests') root.innerHTML = playerProfileHTML(SESSION.playerId, false);
   else if(currentView==='my-injury') root.innerHTML = myInjuryView();
@@ -2759,6 +2762,184 @@ function openOfdModal(pid, existing){
   };
 }
 
+
+/* =============================== HISTORIAL DE PARTIDOS (PF) =============================== */
+let mhTab = 'match';
+let mhEventId = null;
+let mhPlayerId = null;
+function matchHistoryEvents(){
+  const today = todayStr();
+  return STATE.events.filter(e=>e.type==='Partido' && e.date<=today).sort((a,b)=>b.date.localeCompare(a.date));
+}
+function mhLabel(ev){ return `${fmtDate(ev.date)} · ${ev.category==='Ambas'?'Plantel':ev.category}${ev.opponent?` vs ${ev.opponent}`:''}`; }
+function mhRow(ev, p){
+  const w = STATE.wellness.find(x=>x.playerId===p.id && x.date===ev.date);
+  const r = {ev, p, w, hasPre:false, hasPost:false};
+  if(!w) return r;
+  r.hasPre = w.preDone!==undefined ? !!w.preDone : true;
+  r.hasPost = isPostDone(w);
+  const num = v=> (v===undefined || v===null || v==='' || isNaN(Number(v))) ? null : Number(v);
+  r.sleep = r.hasPre ? num(w.sleepHours) : null;
+  r.fatigue = r.hasPre ? num(w.fatigue) : null;
+  r.soreness = r.hasPre ? num(w.soreness) : null;
+  r.mood = r.hasPre ? num(w.mood) : null;
+  r.ready = num(w.matchReady);
+  r.nerves = num(w.matchNerves);
+  const min = Number(w.match||0);
+  r.played = w.playedMatch===true ? true : (w.playedMatch===false ? false : (r.hasPost && min>0 ? true : null));
+  r.min = r.hasPost && r.played ? min : null;
+  r.pse = r.hasPost && r.played ? num(w.rpePartido!==undefined ? w.rpePartido : w.rpePelota) : null;
+  r.rating = num(w.matchRating);
+  r.load = r.hasPost && r.played ? sessionLoad(w) : null;
+  r.painPre = (w.painAreas||[]).map(a=>`${a.part} ${a.scale}/10`).join(', ');
+  r.painPost = (w.postPainAreas||[]).map(a=>`${a.part} ${a.scale}/10`).join(', ');
+  return r;
+}
+function mhRowsForEvent(ev){
+  return STATE.players.filter(p=>{ const cats=playerCategories(p); return ev.category==='Ambas' || cats.includes(ev.category); })
+    .sort((a,b)=>a.name.localeCompare(b.name,'es')).map(p=>mhRow(ev,p));
+}
+function mhAvg(rows, key){
+  const v = rows.map(r=>r[key]).filter(x=>x!==null && x!==undefined && !isNaN(x));
+  return v.length ? v.reduce((a,b)=>a+b,0)/v.length : null;
+}
+function mhFmt(n, d=1){ return n===null || n===undefined || isNaN(n) ? '—' : (Number.isInteger(n) ? String(n) : n.toFixed(d)); }
+function mhExportRows(){
+  const out = [];
+  matchHistoryEvents().slice().reverse().forEach(ev=>{
+    mhRowsForEvent(ev).forEach(r=>{
+      out.push({
+        Fecha: ev.date, Categoria: ev.category, Rival: ev.opponent||'', Jugadora: r.p.name,
+        'Previa cargada': r.hasPre?'Sí':'No', 'PSE cargada': r.hasPost?'Sí':'No',
+        Sueno_h: r.sleep, Fatiga: r.fatigue, Dolor_muscular: r.soreness, Animo: r.mood,
+        Disposicion_previa: r.ready, Nervios_previa: r.nerves, Molestias_previas: r.painPre,
+        Jugo: r.played===true?'Sí':(r.played===false?'No':''), Minutos: r.min, PSE_partido: r.pse, Rendimiento: r.rating,
+        Molestias_al_terminar: r.painPost, Carga: r.load
+      });
+    });
+  });
+  return out;
+}
+function viewMatchHistory(){
+  const evs = matchHistoryEvents();
+  if(!evs.length) return `<div class="card"><div class="empty-state">Todavía no hay partidos pasados cargados en el calendario.</div></div>`;
+  if(!mhEventId || !evs.find(e=>e.id===mhEventId)) mhEventId = evs[0].id;
+  const tabs = `
+  <div class="tabs">
+    <button class="tab-btn ${mhTab==='match'?'active':''}" data-mhtab="match">Por partido</button>
+    <button class="tab-btn ${mhTab==='player'?'active':''}" data-mhtab="player">Por jugadora</button>
+    <button class="tab-btn ${mhTab==='trend'?'active':''}" data-mhtab="trend">Evolución del equipo</button>
+  </div>
+  <div style="display:flex; justify-content:flex-end; margin-bottom:12px;"><button class="btn secondary sm" id="btn-mh-excel">⬇️ Descargar historial (Excel)</button></div>`;
+  const note = `<div class="muted" style="font-size:12px; margin-top:8px;">El historial se arma con los wellness y PSE de cada día de partido (no se borra ni se mezcla con los entrenamientos). Los partidos anteriores a la nueva previa de partido no tienen disposición ni nervios. En esos, la PSE puede ser la de pelota.</div>`;
+  if(mhTab==='match'){
+    const ev = evs.find(e=>e.id===mhEventId);
+    const rows = mhRowsForEvent(ev);
+    const played = rows.filter(r=>r.played===true);
+    return tabs + `
+    <div class="card" style="margin-bottom:16px;">
+      <div class="field-wrap"><label class="field">Partido</label><select id="mh-event">${evs.map(e=>`<option value="${e.id}" ${e.id===ev.id?'selected':''}>${mhLabel(e)}</option>`).join('')}</select></div>
+      <div class="muted" style="font-size:12.5px; margin-bottom:10px;">Previa cargada: <b>${rows.filter(r=>r.hasPre).length}/${rows.length}</b> · PSE cargada: <b>${rows.filter(r=>r.hasPost).length}/${rows.length}</b> · Jugaron: <b>${played.length}</b></div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; margin-bottom:14px;">
+        ${[['SUEÑO (h)','sleep'],['FATIGA','fatigue'],['DOLOR MUSC.','soreness'],['ÁNIMO','mood'],['DISPOSICIÓN','ready'],['NERVIOS','nerves'],['MIN. JUGADOS','min'],['PSE PARTIDO','pse'],['RENDIMIENTO','rating'],['CARGA','load']].map(([l,k])=>`
+        <div class="card" style="margin:0;"><div class="muted" style="font-size:10.5px;">${l}</div><div class="kpi-big">${mhFmt(mhAvg(rows,k), k==='load'||k==='min'?0:1)}</div></div>`).join('')}
+      </div>
+      <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Jugadora</th><th>Sueño</th><th>Fatiga</th><th>Dolor</th><th>Ánimo</th><th>Disp.</th><th>Nervios</th><th>Jugó</th><th>Min.</th><th>PSE</th><th>Rend.</th><th>Carga</th><th>Molestias previas</th><th>Molestias al terminar</th></tr></thead>
+        <tbody>${rows.map(r=>`
+          <tr>
+            <td><b>${r.p.name}</b>${!r.hasPre && !r.hasPost ? ' <span class="muted" style="font-size:11px;">(sin datos)</span>' : ''}</td>
+            <td>${mhFmt(r.sleep)}</td><td>${mhFmt(r.fatigue)}</td><td>${mhFmt(r.soreness)}</td><td>${mhFmt(r.mood)}</td>
+            <td>${mhFmt(r.ready)}</td><td>${mhFmt(r.nerves)}</td>
+            <td>${r.played===true?'Sí':(r.played===false?'No':'—')}</td>
+            <td>${mhFmt(r.min,0)}</td><td>${mhFmt(r.pse)}</td><td>${mhFmt(r.rating)}</td><td>${mhFmt(r.load,0)}</td>
+            <td style="font-size:12px;">${r.painPre||'—'}</td><td style="font-size:12px;">${r.painPost||'—'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      </div>
+      ${note}
+    </div>`;
+  }
+  if(mhTab==='player'){
+    const players = STATE.players.slice().sort((a,b)=>a.name.localeCompare(b.name,'es'));
+    if(!mhPlayerId || !getPlayer(mhPlayerId)) mhPlayerId = players[0] ? players[0].id : null;
+    const pl = getPlayer(mhPlayerId);
+    const rows = pl ? evs.filter(e=>e.category==='Ambas' || playerCategories(pl).includes(e.category)).map(e=>mhRow(e,pl)) : [];
+    const avgRow = (k,d)=>mhFmt(mhAvg(rows,k),d);
+    return tabs + `
+    <div class="card" style="margin-bottom:16px;">
+      <div class="field-wrap"><label class="field">Jugadora</label><select id="mh-player">${players.map(p=>`<option value="${p.id}" ${p.id===mhPlayerId?'selected':''}>${p.name}</option>`).join('')}</select></div>
+      <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Partido</th><th>Sueño</th><th>Fatiga</th><th>Dolor</th><th>Ánimo</th><th>Disp.</th><th>Nervios</th><th>Jugó</th><th>Min.</th><th>PSE</th><th>Rend.</th><th>Carga</th><th>Molestias previas</th><th>Molestias al terminar</th></tr></thead>
+        <tbody>${rows.map(r=>`
+          <tr>
+            <td><b>${mhLabel(r.ev)}</b></td>
+            <td>${mhFmt(r.sleep)}</td><td>${mhFmt(r.fatigue)}</td><td>${mhFmt(r.soreness)}</td><td>${mhFmt(r.mood)}</td>
+            <td>${mhFmt(r.ready)}</td><td>${mhFmt(r.nerves)}</td>
+            <td>${r.played===true?'Sí':(r.played===false?'No':'—')}</td>
+            <td>${mhFmt(r.min,0)}</td><td>${mhFmt(r.pse)}</td><td>${mhFmt(r.rating)}</td><td>${mhFmt(r.load,0)}</td>
+            <td style="font-size:12px;">${r.painPre||'—'}</td><td style="font-size:12px;">${r.painPost||'—'}</td>
+          </tr>`).join('')}
+          <tr style="font-weight:700; background:var(--bg-raise);"><td>Promedio</td><td>${avgRow('sleep')}</td><td>${avgRow('fatigue')}</td><td>${avgRow('soreness')}</td><td>${avgRow('mood')}</td><td>${avgRow('ready')}</td><td>${avgRow('nerves')}</td><td>—</td><td>${avgRow('min',0)}</td><td>${avgRow('pse')}</td><td>${avgRow('rating')}</td><td>${avgRow('load',0)}</td><td></td><td></td></tr>
+        </tbody>
+      </table>
+      </div>
+      ${note}
+    </div>`;
+  }
+  // Evolución del equipo
+  const asc = evs.slice().reverse();
+  const stats = asc.map(ev=>{ const rows = mhRowsForEvent(ev); return {ev, rows}; });
+  return tabs + `
+  <div class="card" style="margin-bottom:16px;">
+    <h3>Estado previo al partido (promedio del equipo)</h3>
+    <div class="section-sub">Fatiga, dolor muscular, ánimo, disposición y nervios (escala 1-5) en cada partido.</div>
+    <div style="position:relative; height:260px;"><canvas id="chart-mh-pre"></canvas></div>
+  </div>
+  <div class="card" style="margin-bottom:16px;">
+    <h3>Carga del partido (promedio de quienes jugaron)</h3>
+    <div class="section-sub">PSE del partido (0-10) y minutos jugados.</div>
+    <div style="position:relative; height:260px;"><canvas id="chart-mh-load"></canvas></div>
+  </div>
+  <div class="card">
+    <h3>Resumen por partido</h3>
+    <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Partido</th><th>Previa</th><th>PSE cargada</th><th>Sueño</th><th>Fatiga</th><th>Dolor</th><th>Ánimo</th><th>Disp.</th><th>Nervios</th><th>Min.</th><th>PSE</th><th>Rend.</th></tr></thead>
+      <tbody>${stats.slice().reverse().map(({ev,rows})=>`
+        <tr><td><b>${mhLabel(ev)}</b></td><td>${rows.filter(r=>r.hasPre).length}/${rows.length}</td><td>${rows.filter(r=>r.hasPost).length}/${rows.length}</td>
+        <td>${mhFmt(mhAvg(rows,'sleep'))}</td><td>${mhFmt(mhAvg(rows,'fatigue'))}</td><td>${mhFmt(mhAvg(rows,'soreness'))}</td><td>${mhFmt(mhAvg(rows,'mood'))}</td>
+        <td>${mhFmt(mhAvg(rows,'ready'))}</td><td>${mhFmt(mhAvg(rows,'nerves'))}</td><td>${mhFmt(mhAvg(rows,'min'),0)}</td><td>${mhFmt(mhAvg(rows,'pse'))}</td><td>${mhFmt(mhAvg(rows,'rating'))}</td></tr>`).join('')}
+      </tbody>
+    </table>
+    </div>
+    ${note}
+  </div>`;
+}
+function drawMatchHistoryCharts(){
+  const c1 = document.getElementById('chart-mh-pre'); const c2 = document.getElementById('chart-mh-load');
+  if(!c1 || !c2) return;
+  const asc = matchHistoryEvents().slice().reverse();
+  const rowsBy = asc.map(ev=>mhRowsForEvent(ev));
+  const labels = asc.map(ev=>`${fmtDate(ev.date).slice(0,5)} ${ev.opponent?ev.opponent.slice(0,10):''}`.trim());
+  const ds = (label,key,color)=>({label, data: rowsBy.map(r=>{ const v=mhAvg(r,key); return v===null?null:Number(v.toFixed(2)); }), borderColor:color, backgroundColor:color, tension:.25, spanGaps:true, pointRadius:3});
+  if(chartRegistry['mh-pre']) chartRegistry['mh-pre'].destroy();
+  const o1 = chartOpts(); o1.scales.y.min = 1; o1.scales.y.max = 5;
+  chartRegistry['mh-pre'] = new Chart(c1.getContext('2d'), { type:'line', data:{ labels, datasets:[
+    ds('Fatiga','fatigue','#c8102e'), ds('Dolor muscular','soreness','#e3a857'), ds('Ánimo','mood','#5fa777'), ds('Disposición','ready','#5f8ca7'), ds('Nervios','nerves','#9b7fd1')
+  ]}, options:o1 });
+  if(chartRegistry['mh-load']) chartRegistry['mh-load'].destroy();
+  const o2 = chartOpts();
+  o2.scales.y.min = 0; o2.scales.y.max = 10;
+  o2.scales.y1 = { position:'right', min:0, ticks:{color:'#9a9c8f'}, grid:{drawOnChartArea:false} };
+  chartRegistry['mh-load'] = new Chart(c2.getContext('2d'), { type:'bar', data:{ labels, datasets:[
+    { type:'line', label:'PSE partido', data: rowsBy.map(r=>{ const v=mhAvg(r,'pse'); return v===null?null:Number(v.toFixed(2)); }), borderColor:'#c8102e', backgroundColor:'#c8102e', yAxisID:'y', tension:.25, spanGaps:true, pointRadius:3 },
+    { type:'bar', label:'Minutos jugados', data: rowsBy.map(r=>{ const v=mhAvg(r,'min'); return v===null?null:Math.round(v); }), backgroundColor:'rgba(95,140,167,0.55)', yAxisID:'y1' }
+  ]}, options:o2 });
+}
 function pfMatchCardHTML(){
   const today = todayStr();
   const past = STATE.events.filter(e=>e.type==='Partido' && e.date<=today).map(e=>e.date).sort();
@@ -3047,18 +3228,38 @@ function testFormHTML(){
     <button class="btn secondary sm" id="btn-export-tests" style="margin-top:12px;">Exportar todos los testeos a Excel</button>
   </div>`;
 }
+let cmpView = 'last';
+let evoMode = 'bars';
+let evoSel = [];
+let cmpRedrawHook = null;
 function compareHTML(){
   const types = getDistinctTestTypes();
   return `
   <div class="card"><h3>Comparar resultados</h3>
+    <div class="tabs" style="margin-bottom:12px;">
+      <button type="button" class="tab-btn ${cmpView==='last'?'active':''}" data-cmpview="last">Último resultado</button>
+      <button type="button" class="tab-btn ${cmpView==='evo'?'active':''}" data-cmpview="evo">📈 Evolución de todas</button>
+    </div>
     <div class="row">
       <div class="field-wrap"><label class="field">Tipo de test</label><select id="cmp-type">${types.map(t=>`<option>${t}</option>`).join('') || '<option value="">Sin testeos cargados</option>'}</select></div>
       <div class="field-wrap"><label class="field">Agrupar por</label><select id="cmp-group"><option value="jugadora">Jugadora (todas)</option><option value="puesto">Por puesto</option><option value="categoria">Por categoría</option></select></div>
       <div class="field-wrap" id="cmp-filter-wrap" style="display:none;"><label class="field" id="cmp-filter-label">Elegí el puesto</label><select id="cmp-filter"></select></div>
     </div>
     <label style="display:inline-flex; align-items:center; gap:8px; font-size:12.5px; color:var(--ink-dim); margin-bottom:10px;"><input type="checkbox" id="cmp-lowerbetter" style="width:auto;"> En este test, menor valor es mejor (ej: tiempos)</label>
-    <div id="compare-chart-wrap" style="position:relative; height:280px;"><canvas id="chart-compare"></canvas></div>
-    <div id="cmp-legend" class="section-sub" style="margin-top:10px; margin-bottom:0;"></div>
+    <div id="compare-chart-wrap" style="position:relative; height:280px; display:${cmpView==='last'?'block':'none'};"><canvas id="chart-compare"></canvas></div>
+    <div id="cmp-legend" class="section-sub" style="margin-top:10px; margin-bottom:0; display:${cmpView==='last'?'block':'none'};"></div>
+    <div id="cmp-evo-wrap" style="display:${cmpView==='evo'?'block':'none'};">
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px;">
+        <button type="button" class="btn ${evoMode==='bars'?'':'secondary'} sm" data-evomode="bars">📊 Cambio por jugadora</button>
+        <button type="button" class="btn ${evoMode==='lines'?'':'secondary'} sm" data-evomode="lines">📈 Línea de tiempo</button>
+        <label style="display:inline-flex; align-items:center; gap:8px; font-size:12.5px; color:var(--ink-dim); margin-left:auto;"><input type="checkbox" id="cmp-evo-multi" style="width:auto;" checked> Solo jugadoras con 2 o más resultados</label>
+      </div>
+      <div id="evo-help" class="section-sub"></div>
+      <div id="evo-chips" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;"></div>
+      <div id="evo-chart-wrap" style="position:relative; height:420px;"><canvas id="chart-evo"></canvas></div>
+      <div id="evo-legend" class="muted" style="font-size:12px; margin-top:8px;"></div>
+      <div id="evo-table-wrap" style="margin-top:16px;"></div>
+    </div>
   </div>
   <div id="cmp-normalized-wrap"></div>
   <div class="card" style="margin-top:16px;">
@@ -3180,7 +3381,31 @@ function wireRosterTab(){
         ? '🟢 Excelente · 🔵 Bueno · 🔴 A mejorar (según el valor de referencia cargado)'
         : '🟢 Tercio superior del grupo · 🔵 Tercio medio · 🔴 Tercio a reforzar (comparación relativa)';
     };
-    const redraw=()=>{ drawCompareChart(typeSel.value, groupSel.value, filterSel.value, lowerBetterChk.checked); renderNormalizedView(typeSel.value, groupSel.value); };
+    const evoMulti = document.getElementById('cmp-evo-multi');
+    const applyCmpView=()=>{
+      const evo = cmpView==='evo';
+      document.getElementById('compare-chart-wrap').style.display = evo ? 'none' : 'block';
+      document.getElementById('cmp-legend').style.display = evo ? 'none' : 'block';
+      document.getElementById('cmp-evo-wrap').style.display = evo ? 'block' : 'none';
+      document.querySelectorAll('[data-cmpview]').forEach(b=>b.classList.toggle('active', b.dataset.cmpview===cmpView));
+    };
+    const redraw=()=>{
+      applyCmpView();
+      if(cmpView==='evo'){
+        const nw = document.getElementById('cmp-normalized-wrap'); if(nw) nw.innerHTML='';
+        drawEvolutionChart(typeSel.value, groupSel.value, filterSel.value, lowerBetterChk.checked, evoMulti.checked);
+      } else {
+        drawCompareChart(typeSel.value, groupSel.value, filterSel.value, lowerBetterChk.checked); renderNormalizedView(typeSel.value, groupSel.value);
+      }
+    };
+    cmpRedrawHook = redraw;
+    document.querySelectorAll('[data-cmpview]').forEach(b=>b.addEventListener('click',()=>{ cmpView=b.dataset.cmpview; redraw(); }));
+    document.querySelectorAll('[data-evomode]').forEach(b=>b.addEventListener('click',()=>{
+      evoMode=b.dataset.evomode;
+      document.querySelectorAll('[data-evomode]').forEach(x=>x.classList.toggle('secondary', x.dataset.evomode!==evoMode));
+      redraw();
+    }));
+    evoMulti.addEventListener('change', redraw);
     typeSel.addEventListener('change',()=>{ updateLowerBetterDefault(); renderBenchmarkFields(); redraw(); });
     groupSel.addEventListener('change',()=>{ updateFilterOptions(); redraw(); });
     filterSel.addEventListener('change',redraw);
@@ -3264,6 +3489,138 @@ function drawProfileCharts(pid){
       options: chartOpts()
     });
   });
+}
+
+function evolutionPlayers(groupBy, filterValue){
+  if(groupBy==='puesto' && filterValue) return STATE.players.filter(p=>playerPositions(p).includes(filterValue));
+  if(groupBy==='categoria' && filterValue) return STATE.players.filter(p=>playerCategories(p).includes(filterValue));
+  return STATE.players.slice();
+}
+function drawEvolutionChart(type, groupBy, filterValue, lowerBetter, onlyMulti){
+  const canvas = document.getElementById('chart-evo'); if(!canvas) return;
+  const tableWrap = document.getElementById('evo-table-wrap');
+  const chipsEl = document.getElementById('evo-chips'), helpEl = document.getElementById('evo-help'), legEl = document.getElementById('evo-legend');
+  const relevant = STATE.tests.filter(t=>t.type===type && !isNaN(Number(t.value)));
+  const unit = relevant.length ? (relevant[0].unit||'') : '';
+  const players = evolutionPlayers(groupBy, filterValue);
+  let series = players.map(p=>{
+    const byDate = {};
+    relevant.filter(t=>t.playerId===p.id).forEach(t=>{ byDate[t.date] = Number(t.value); });   // si hay varios el mismo día, queda el último cargado
+    const dates = Object.keys(byDate).sort();
+    return {p, byDate, dates};
+  }).filter(x=>x.dates.length>0);
+  if(onlyMulti) series = series.filter(x=>x.dates.length>=2);
+  if(chartRegistry['evo']) chartRegistry['evo'].destroy();
+  const wrap = document.getElementById('evo-chart-wrap');
+  const fmtN = n=> Number.isInteger(n) ? String(n) : n.toFixed(1);
+  const GREEN='#5fa777', RED='#e0334f', GREY='#8a8d83';
+  if(!series.length){
+    canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);
+    chipsEl.innerHTML=''; helpEl.textContent=''; legEl.textContent='';
+    tableWrap.innerHTML = `<div class="empty-state">${onlyMulti ? 'Todavía no hay jugadoras con 2 o más resultados de este test. Destildá la opción de arriba para ver también a quienes tienen un solo resultado.' : 'Sin resultados cargados para este test.'}</div>`;
+    return;
+  }
+  // cambio de cada jugadora
+  const rows = series.map(x=>{
+    const first = x.byDate[x.dates[0]], last = x.byDate[x.dates[x.dates.length-1]];
+    const diff = last-first; const pct = first!==0 ? (diff/Math.abs(first))*100 : null;
+    const better = x.dates.length<2 || diff===0 ? null : (lowerBetter ? diff<0 : diff>0);
+    return {x, name:x.p.name, short:x.p.name.split(' ')[0]+' '+(x.p.name.split(' ').slice(-1)[0]||''), n:x.dates.length, firstD:x.dates[0], lastD:x.dates[x.dates.length-1], first, last, diff, pct, better};
+  }).sort((a,b)=>{
+    const av = a.pct===null||a.n<2 ? -Infinity : (lowerBetter ? -a.pct : a.pct);
+    const bv = b.pct===null||b.n<2 ? -Infinity : (lowerBetter ? -b.pct : b.pct);
+    return bv-av;
+  });
+  const dirColor = r=> r.better===null ? GREY : (r.better ? GREEN : RED);
+  const multi = rows.filter(r=>r.n>=2);
+  const dayNum = d=> Math.round(new Date(d+'T00:00:00Z').getTime()/86400000);
+  const dayToDate = n=> new Date(n*86400000).toISOString().slice(0,10);
+  const baseOpts = ()=>{ const o = chartOpts(); o.plugins = {legend:{display:false}}; return o; };
+  const sel = evoSel.filter(id=>rows.some(r=>r.x.p.id===id));
+
+  if(evoMode==='bars'){
+    helpEl.innerHTML = `Cambio entre el <b>primer</b> y el <b>último</b> resultado de cada jugadora. <b style="color:${GREEN};">Verde</b> = mejoró · <b style="color:${RED};">Rojo</b> = empeoró${lowerBetter?' (en este test menor valor es mejor)':''}.`;
+    chipsEl.innerHTML = '';
+    const list = multi.length ? multi : [];
+    if(!list.length){
+      canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);
+      legEl.textContent = 'Hace falta al menos 2 resultados por jugadora para ver el cambio.';
+    } else {
+      if(wrap) wrap.style.height = Math.max(240, list.length*38+70) + 'px';
+      const o = baseOpts();
+      o.indexAxis = 'y'; o.layout = {padding:{right:12}};
+      o.scales = {
+        x:{ title:{display:true, text:`Cambio (%)`, color:'#9a9c8f'}, ticks:{color:'#9a9c8f', callback:v=>v+'%'}, grid:{color:ctxLine=>ctxLine.tick && ctxLine.tick.value===0 ? '#f4f2ea' : '#2a2c26', lineWidth:ctxLine=>ctxLine.tick && ctxLine.tick.value===0 ? 2 : 1} },
+        y:{ ticks:{color:'#f4f2ea', font:{size:11.5, weight:'600'}}, grid:{display:false} }
+      };
+      o.plugins = { legend:{display:false}, tooltip:{ callbacks:{
+        title:(items)=> list[items[0].dataIndex].name,
+        label:(c)=>{ const r=list[c.dataIndex]; return [`${fmtN(r.first)} → ${fmtN(r.last)}${unit?' '+unit:''}`, `Cambio: ${r.diff>0?'+':''}${fmtN(r.diff)}${unit?' '+unit:''} (${r.pct!==null?(r.pct>0?'+':'')+r.pct.toFixed(1)+'%':'—'})`, `${fmtDate(r.firstD)} → ${fmtDate(r.lastD)} · ${r.n} resultados`]; } } } };
+      chartRegistry['evo'] = new Chart(canvas.getContext('2d'), { type:'bar', data:{
+        labels: list.map(r=>`${r.name}  ${r.diff>0?'+':''}${fmtN(r.diff)}${unit?' '+unit:''}`),
+        datasets:[{ data:list.map(r=>r.pct===null?0:Number(r.pct.toFixed(2))), backgroundColor:list.map(dirColor), borderRadius:6, barPercentage:0.7, categoryPercentage:0.85 }]
+      }, options:o });
+      legEl.textContent = rows.length>list.length ? `${rows.length-list.length} jugadora(s) con un solo resultado no se muestran en este gráfico.` : '';
+    }
+  } else {
+    // Línea de tiempo: color por dirección, promedio del grupo y resaltado por selección
+    helpEl.innerHTML = `Cada línea es una jugadora. <b style="color:${GREEN};">Verde</b> = mejoró · <b style="color:${RED};">Rojo</b> = empeoró · gris = sin cambio. La línea <b>blanca punteada</b> es el promedio del grupo. Tocá nombres para resaltar y comparar solo a esas jugadoras.`;
+    chipsEl.innerHTML = rows.map(r=>`<button type="button" class="chip" data-evosel="${r.x.p.id}" style="cursor:pointer; border:1.5px solid ${dirColor(r)}; ${sel.includes(r.x.p.id)?`background:${dirColor(r)}; color:#fff;`:''}">${r.name.split(' ')[0]} ${r.name.split(' ').slice(1).join(' ')}</button>`).join('')
+      + (sel.length ? `<button type="button" class="chip" data-evoclear="1" style="cursor:pointer;">✕ Limpiar selección</button>` : '');
+    const allDates = Array.from(new Set(rows.flatMap(r=>r.x.dates))).sort();
+    const allDays = allDates.map(dayNum);
+    const hasSel = sel.length>0;
+    const datasets = rows.map(r=>{
+      const on = !hasSel || sel.includes(r.x.p.id);
+      const c = dirColor(r);
+      return { label:r.name, data:r.x.dates.map(d=>({x:dayNum(d), y:r.x.byDate[d]})),
+        borderColor: on ? c : 'rgba(138,141,131,0.22)', backgroundColor: on ? c : 'rgba(138,141,131,0.22)',
+        borderWidth: hasSel && on ? 4 : (hasSel ? 1.5 : 2.2), pointRadius: hasSel && on ? 6 : (hasSel ? 2 : 3.5), pointHoverRadius:7,
+        spanGaps:true, tension:.15, order: on ? 1 : 2 };
+    });
+    // promedio del grupo en cada fecha de testeo (de las jugadoras que se testearon ese día)
+    const avgPts = allDates.map(d=>{ const v = rows.filter(r=>r.x.byDate[d]!==undefined).map(r=>r.x.byDate[d]); return v.length>=2 ? {x:dayNum(d), y:Number((v.reduce((a,b)=>a+b,0)/v.length).toFixed(2))} : null; }).filter(Boolean);
+    if(avgPts.length>=2) datasets.push({ label:'Promedio del grupo', data:avgPts, borderColor:'#f4f2ea', backgroundColor:'#f4f2ea', borderDash:[7,5], borderWidth:3, pointRadius:4, pointStyle:'rectRot', tension:0, order:0 });
+    const o = baseOpts();
+    o.interaction = { mode:'nearest', intersect:true };
+    o.layout = { padding:{right: 110} };
+    const span = Math.max(allDays[allDays.length-1]-allDays[0], 1);
+    o.scales.x = { type:'linear', min: allDays[0]-Math.ceil(span*0.03), max: allDays[allDays.length-1]+Math.ceil(span*0.03),
+      afterBuildTicks: axis=>{ axis.ticks = allDays.map(v=>({value:v})); },
+      ticks:{ color:'#9a9c8f', callback:v=>fmtDate(dayToDate(v)), maxRotation:50, autoSkip:false }, grid:{color:'#2a2c26'} };
+    o.scales.y.title = { display:true, text: unit || 'Valor', color:'#9a9c8f' };
+    o.plugins = { legend:{display:false}, tooltip:{ callbacks:{ title:(items)=> items.length ? fmtDate(dayToDate(items[0].parsed.x)) : '', label:(c)=>`${c.dataset.label}: ${c.parsed.y}${unit?' '+unit:''}` } } };
+    // nombre al final de las líneas resaltadas (o de todas si son pocas)
+    const endLabels = { id:'endLabels', afterDatasetsDraw(chart){
+      const ctx = chart.ctx; ctx.save(); ctx.font = '600 11px sans-serif'; ctx.textBaseline = 'middle';
+      chart.data.datasets.forEach((ds,i)=>{
+        if(ds.label==='Promedio del grupo') return;
+        const showIt = hasSel ? sel.includes(rows.find(r=>r.name===ds.label).x.p.id) : rows.length<=6;
+        if(!showIt) return;
+        const meta = chart.getDatasetMeta(i); const pt = meta.data[meta.data.length-1]; if(!pt) return;
+        ctx.fillStyle = ds.borderColor; ctx.fillText(ds.label.split(' ')[0]+' '+(ds.label.split(' ').slice(-1)[0]), pt.x+9, pt.y);
+      }); ctx.restore(); } };
+    if(wrap) wrap.style.height = '440px';
+    chartRegistry['evo'] = new Chart(canvas.getContext('2d'), { type:'line', data:{ datasets }, options:o, plugins:[endLabels] });
+    legEl.textContent = '';
+    chipsEl.querySelectorAll('[data-evosel]').forEach(b=>b.addEventListener('click',()=>{
+      const id = b.dataset.evosel; evoSel = evoSel.includes(id) ? evoSel.filter(x=>x!==id) : evoSel.concat(id);
+      if(cmpRedrawHook) cmpRedrawHook();
+    }));
+    const clr = chipsEl.querySelector('[data-evoclear]'); if(clr) clr.addEventListener('click',()=>{ evoSel=[]; if(cmpRedrawHook) cmpRedrawHook(); });
+  }
+  // tabla de cambios
+  tableWrap.innerHTML = `
+    <h3 style="margin-bottom:6px;">Detalle del cambio por jugadora</h3>
+    <div class="section-sub">Ordenado de mayor mejora a menor${lowerBetter?' (en este test menor valor es mejor)':''}.</div>
+    <div style="overflow-x:auto;"><table>
+      <thead><tr><th>Jugadora</th><th>Resultados</th><th>Primero</th><th>Último</th><th>Cambio</th></tr></thead>
+      <tbody>${rows.map(r=>`
+        <tr><td><b>${r.name}</b></td><td>${r.n}</td>
+        <td>${fmtN(r.first)}${unit?' '+unit:''} <span class="muted" style="font-size:11px;">${fmtDate(r.firstD)}</span></td>
+        <td>${fmtN(r.last)}${unit?' '+unit:''} <span class="muted" style="font-size:11px;">${fmtDate(r.lastD)}</span></td>
+        <td>${r.n<2 ? '<span class="muted">Un solo resultado</span>' : `<span class="badge ${r.diff===0?'info':(r.better?'ok':'danger')}">${r.diff>0?'+':''}${fmtN(r.diff)}${unit?' '+unit:''}${r.pct!==null?` (${r.pct>0?'+':''}${r.pct.toFixed(1)}%)`:''}</span>`}</td></tr>`).join('')}
+      </tbody></table></div>`;
 }
 function drawCompareChart(type, groupBy, filterValue, lowerBetterOverride){
   const canvas = document.getElementById('chart-compare'); if(!canvas) return;
@@ -5416,7 +5773,45 @@ function updateLoadBadge(){
   const lvl = loadLevel(load);
   badge.textContent = lvl.label; badge.className = 'badge '+lvl.cls;
 }
+function myCheckinsHTML(){
+  if(!wellnessDataReady && firebaseReady) return '';
+  const p = activePlayer(); if(!p) return '';
+  const today = todayStr();
+  const cutoff = (()=>{ const d=new Date(today+'T00:00:00'); d.setDate(d.getDate()-20); return dateStrLocal(d); })();
+  const mine = STATE.wellness.filter(w=>w.playerId===p.id && w.date>=cutoff && w.date<=today).sort((a,b)=>b.date.localeCompare(a.date));
+  if(!mine.length) return '';
+  return `
+  <div class="card" style="margin-top:16px;">
+    <h3>✏️ Mis check-ins recientes</h3>
+    <div class="section-sub">Si cargaste algo mal, podés corregirlo. Se guardan los cambios y se actualiza tu resultado.</div>
+    ${mine.map(w=>{
+      const hasPre = w.preDone!==undefined ? !!w.preDone : true;
+      const hasPost = isPostDone(w);
+      const match = w.isMatch || isMatchDay(p.id, w.date);
+      return `
+      <div class="injury-row" style="align-items:center; gap:8px; flex-wrap:wrap;">
+        <div style="flex:1; min-width:140px;">
+          <b>${fmtDate(w.date)}${w.date===today?' · hoy':''}</b> ${match?'<span class="match-chip">Partido</span>':''}
+          <div class="muted" style="font-size:12px;">Antes: ${hasPre?'✅':'—'} · Después (PSE): ${hasPost?'✅':'pendiente'}</div>
+        </div>
+        <button type="button" class="btn secondary sm" data-edit-day="${w.date}" data-edit-part="pre" style="padding:7px 12px; font-size:12.5px;">✏️ Wellness</button>
+        <button type="button" class="btn secondary sm" data-edit-day="${w.date}" data-edit-part="post" style="padding:7px 12px; font-size:12.5px;">✏️ PSE</button>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
 function viewWellness(){
+  const main = viewWellnessMain();
+  return main + (wellnessForceEdit ? '' : myCheckinsHTML());
+}
+function editBannerHTML(targetDate, part){
+  return `
+  <div class="card" style="margin-bottom:16px; border:1.5px solid var(--blue); background:rgba(95,140,167,0.08); display:flex; align-items:center; justify-content:space-between; gap:10px;">
+    <div>✏️ Editando ${part==='pre'?'el wellness de antes':'la PSE de después'} del <b>${fmtDate(targetDate)}</b></div>
+    <button type="button" class="btn secondary" id="btn-cancel-edit" style="padding:7px 14px; font-size:12.5px; flex-shrink:0;">Cancelar</button>
+  </div>`;
+}
+function viewWellnessMain(){
   if(firebaseReady && !wellnessDataReady){
     return `<div class="card"><div class="empty-state" style="padding:40px 20px; text-align:center;">
       <div style="font-size:28px; margin-bottom:10px;">⏳</div>
@@ -5471,6 +5866,13 @@ function viewWellness(){
     <button type="button" class="btn secondary" id="btn-back-today" style="padding:7px 14px; font-size:12.5px; flex-shrink:0;">Volver a hoy</button>
   </div>` : ''}`;
 
+  // Edición puntual de un día anterior (desde "Mis check-ins recientes")
+  if(!isToday && entry && (wellnessForceEdit==='pre' || wellnessForceEdit==='post')){
+    if(wellnessForceEdit==='pre') return editBannerHTML(targetDate,'pre') + wellnessPreFormHTML(p, targetDate, isToday, entry)
+      + `<button class="btn save-wellness-btn" id="btn-save-wellness-pre">💾 Guardar cambios del ${fmtDate(targetDate)}</button>`;
+    return editBannerHTML(targetDate,'post') + wellnessPostFormHTML(p, targetDate, isToday, myCats)
+      + `<button class="btn save-wellness-btn" id="btn-save-wellness-post">💾 Guardar cambios del ${fmtDate(targetDate)}</button>`;
+  }
   // Día atrasado: se completa todo junto (pre + post), como antes, para simplificar la puesta al día.
   if(!isToday){
     return banners + wellnessPreFormHTML(p, targetDate, isToday, entry) + wellnessPostFormHTML(p, targetDate, isToday, myCats)
@@ -5488,18 +5890,18 @@ function viewWellness(){
   }
   // Hoy, pero todavía no completó el wellness de antes de la sesión (o lo está editando a propósito)
   if(!preDone || wellnessForceEdit==='pre'){
-    return banners + wellnessPreFormHTML(p, targetDate, isToday, entry)
-      + `<button class="btn save-wellness-btn" id="btn-save-wellness-pre">💾 Guardar check-in de antes de la sesión</button>`;
+    return banners + (wellnessForceEdit==='pre' ? editBannerHTML(targetDate,'pre') : '') + wellnessPreFormHTML(p, targetDate, isToday, entry)
+      + `<button class="btn save-wellness-btn" id="btn-save-wellness-pre">💾 ${wellnessForceEdit==='pre' ? 'Guardar cambios' : 'Guardar check-in de antes de la sesión'}</button>`;
   }
   // Ya completó el de antes, falta el de después (PSE + carga) — o lo está editando a propósito
   if(!postDone || wellnessForceEdit==='post'){
-    return banners + (postDone ? '' : `
+    return banners + (wellnessForceEdit==='post' ? editBannerHTML(targetDate,'post') : '') + (postDone ? '' : `
     <div class="card" style="margin-bottom:16px; border:1.5px solid var(--green); background:rgba(95,167,119,0.08);">
       <h3>✅ Ya completaste tu check-in de antes de la sesión</h3>
       <div class="section-sub">${isMatchDay(p.id, targetDate) ? 'Ahora te falta cargar cómo te fue DESPUÉS del partido (minutos, PSE y molestias).' : 'Ahora te falta cargar cómo te sentiste DESPUÉS de entrenar (PSE, minutos y molestias).'}</div>
     </div>`)
       + wellnessPostFormHTML(p, targetDate, isToday, myCats)
-      + `<button class="btn save-wellness-btn" id="btn-save-wellness-post">💾 Guardar PSE de después de la sesión</button>`;
+      + `<button class="btn save-wellness-btn" id="btn-save-wellness-post">💾 ${wellnessForceEdit==='post' ? 'Guardar cambios' : 'Guardar PSE de después de la sesión'}</button>`;
   }
   // Ya completó los dos hoy
   return banners + `
@@ -5929,6 +6331,14 @@ function afterRender(){
       }))});
     });
   }
+  if(currentView==='match-history'){
+    document.querySelectorAll('[data-mhtab]').forEach(b=>b.addEventListener('click',()=>{ mhTab=b.dataset.mhtab; render(); }));
+    const evSel = document.getElementById('mh-event'); if(evSel) evSel.addEventListener('change',()=>{ mhEventId=evSel.value; render(); });
+    const plSel = document.getElementById('mh-player'); if(plSel) plSel.addEventListener('change',()=>{ mhPlayerId=plSel.value; render(); });
+    const xl = document.getElementById('btn-mh-excel');
+    if(xl) xl.addEventListener('click',()=>exportToExcel('historial-partidos-'+todayStr()+'.xlsx', {'Historial partidos': mhExportRows()}));
+    drawMatchHistoryCharts();
+  }
   if(currentView==='wellness'){
     document.querySelectorAll('.body-part').forEach(el=>el.addEventListener('click',()=>{
       const box = el.closest('[data-painctx]');
@@ -6128,10 +6538,14 @@ function afterRender(){
     }
     const btnPre = document.getElementById('btn-save-wellness-pre');
     if(btnPre) btnPre.addEventListener('click', async ()=>{
+      const wasEditing = !!wellnessForceEdit;
       const entryData = await persistWellness({...buildPreFields(), preDone:true});
       if(!entryData){ return; }
       wellnessForceEdit = null; wellnessVoluntaryToday = false;
-      toast('Wellness de antes de la sesión guardado. ¡No te olvides de cargar la PSE después de entrenar!');
+      const editedDate = wellnessTargetDate || todayStr();
+      wellnessTargetDate = todayStr();
+      if(wasEditing || editedDate!==todayStr()) toast('Cambios guardados ✅');
+      else toast('Wellness de antes de la sesión guardado. ¡No te olvides de cargar la PSE después de entrenar!');
       render();
     });
     function matchAnswerMissing(){
@@ -6146,7 +6560,7 @@ function afterRender(){
       if(matchAnswerMissing()) return;
       const entryData = await persistWellness({...buildPostFields(), postDone:true});
       if(!entryData){ return; }
-      wellnessForceEdit = null; wellnessVoluntaryToday = false;
+      wellnessForceEdit = null; wellnessVoluntaryToday = false; wellnessTargetDate = todayStr();
       const computed = computeAnalysisFromEntry(entryData);
       const rec = await upsertAnalysis(entryData.playerId, entryData.date, computed);
       showAnalysisModal(rec);
@@ -6170,6 +6584,16 @@ function afterRender(){
       const backTodayFn = ()=>{ wellnessTargetDate = todayStr(); wellnessForceEdit = null; render(); };
       backTodayBtn.addEventListener('click', backTodayFn);
       currentBackAction = backTodayFn;
+    }
+    document.querySelectorAll('[data-edit-day]').forEach(btn=>btn.addEventListener('click', ()=>{
+      wellnessTargetDate = btn.dataset.editDay; wellnessForceEdit = btn.dataset.editPart; wellnessVoluntaryToday = true;
+      render(); window.scrollTo(0,0);
+    }));
+    const cancelEditBtn = document.getElementById('btn-cancel-edit');
+    if(cancelEditBtn){
+      const cancelFn = ()=>{ wellnessForceEdit = null; wellnessTargetDate = todayStr(); render(); };
+      cancelEditBtn.addEventListener('click', cancelFn);
+      currentBackAction = cancelFn;
     }
     const editPreBtn = document.getElementById('btn-edit-pre');
     if(editPreBtn) editPreBtn.addEventListener('click', ()=>{ wellnessForceEdit='pre'; render(); });
