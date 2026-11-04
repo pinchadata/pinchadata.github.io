@@ -536,6 +536,19 @@ input[type=range]::-moz-range-thumb{width:19px; height:19px; border-radius:50%; 
 .match-banner{display:flex; align-items:center; gap:12px; padding:12px 14px; font-size:15px; border-radius:12px; margin-bottom:14px; border:1.5px solid var(--red); background:rgba(200,16,46,.10); font-weight:600;}
 .match-banner .mb-ic{font-size:26px; line-height:1;}
 .match-chip{display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700; background:rgba(200,16,46,.18); color:var(--red);}
+
+.inj-track{margin-top:10px; padding-top:10px; border-top:1px dashed var(--line,#2a2c26);}
+.inj-stats{display:flex; gap:10px; flex-wrap:wrap; margin:8px 0;}
+.inj-stats>div{flex:1 1 90px; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.07); border-radius:8px; padding:8px 10px;}
+.inj-stats.big>div{flex:1 1 120px; padding:12px;}
+.inj-n{font-size:20px; font-weight:700; color:var(--ink,#f4f2ea); line-height:1.1;}
+.inj-stats.big .inj-n{font-size:26px;}
+.inj-l{font-size:10.5px; color:var(--ink-dim,#9a9c8f); text-transform:uppercase; letter-spacing:.04em; margin-top:3px;}
+.inj-hist summary{cursor:pointer; font-size:12px; color:var(--ink-dim,#9a9c8f);}
+.inj-steps{display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:8px;}
+.inj-step{font-size:11.5px; background:rgba(255,255,255,.05); border-radius:6px; padding:4px 8px;}
+.inj-step i{color:var(--ink-dim,#9a9c8f); font-style:normal;}
+.inj-arrow{color:var(--ink-dim,#9a9c8f);}
 </style>
 </head>
 <body>
@@ -954,7 +967,7 @@ function avg(arr){ const a=arr.filter(n=>!isNaN(n)); if(!a.length) return 0; ret
 /* =============================== FIREBASE CONFIG =============================== */
 /* Se actualiza cada vez que se genera una versión nueva del archivo — sirve para confirmar
    rápido, desde Ajustes, si lo que está publicado en GitHub es la última versión o no. */
-const APP_VERSION = "2026-11-01.3";
+const APP_VERSION = "2026-11-03.2";
 const firebaseConfig = {
   apiKey: "AIzaSyBxcxTN2PMGZEdhj1tJcyptwRX86yg2E1w",
   authDomain: "pincha-data.firebaseapp.com",
@@ -3700,7 +3713,7 @@ function downloadFullBackup(){
   exportToExcel(`backup-completo-pincha-data-${todayStr()}.xlsx`, {
     Jugadoras: STATE.players.map(p=>{ const ms = computeMatchStatsFromWellness(p.id); return {Nombre:p.name, Puesto:playerPositionsLabel(p), Categoria:playerCategoriesLabel(p), FechaNacimiento:p.birthdate||'', Altura:p.height||'', Peso:p.weight||'', PartidosCalculados:ms.matches, MinutosCalculados:ms.minutes, PartidosManual:(p.stats&&p.stats.matches)||0, MinutosManual:(p.stats&&p.stats.minutes)||0}; }),
     Testeos: STATE.tests.map(t=>({Jugadora:nameOf(t.playerId), Tipo:t.type, Valor:t.value, Unidad:t.unit||'', Fecha:t.date})),
-    Lesiones: STATE.injuries.map(i=>({Jugadora:nameOf(i.playerId), Tipo:i.type, Zona:i.zone||'', Fecha:i.date, Gravedad:i.severity, Estado:i.status, EtapaRTP:RTP_STAGES[i.stage!==undefined?i.stage:0], Kinesiologia:i.kinesio?'Sí':'No', Descripcion:i.description||''})),
+    Lesiones: STATE.injuries.map(i=>({Jugadora:nameOf(i.playerId), Tipo:i.type, Zona:i.zone||'', Fecha:i.date, FechaAlta:i.dischargeDate||'', DiasBaja:injuryDays(i)===null?'':injuryDays(i), SesionesPerdidas:(()=>{const m=injuryMissed(i,avgSessionMinutes());return m.train+m.match;})(), HorasPerdidasEst:Number(injuryMissed(i,avgSessionMinutes()).hours.toFixed(1)), Historial:injuryHistory(i).map(h=>h.date+' '+h.status).join(' > '), Gravedad:i.severity, Estado:i.status, EtapaRTP:RTP_STAGES[i.stage!==undefined?i.stage:0], Kinesiologia:i.kinesio?'Sí':'No', Descripcion:i.description||''})),
     Wellness: STATE.wellness.map(w=>({Jugadora:nameOf(w.playerId), Fecha:w.date, Sueno:w.sleepHours, Fatiga:w.fatigue, Dolor:w.soreness, Animo:w.mood, Ciclo:w.cyclePhase, CategoriaDelDia:w.dayCategory||'', MinPelota:w.ball||0, MinFisico:w.fitness||0, MinPartido:w.match||0, RPEFisico:w.rpeFisico||'', RPEPelota:w.rpePelota||'', Lesionada:w.injured?'Sí':'No'})),
     Analisis: STATE.analysis.map(a=>({Jugadora:nameOf(a.playerId), Fecha:a.date, Score:a.score, Resultado:a.label, Carga:a.load||0})),
     Cuentas: STATE.accounts.map(a=>({Usuario:a.username, Rol:a.role==='pf'?'Cuerpo técnico':'Jugadora', Nombre:a.role==='pf'?(a.staffName||''):nameOf(a.playerId)})),
@@ -3955,6 +3968,97 @@ function openEditPlayerModal(pid){
 function closeModal(){ document.getElementById('modal-root').innerHTML=''; }
 
 /* =============================== INJURIES (PF) =============================== */
+
+/* =============================== SEGUIMIENTO DE LESIONES =============================== */
+const dayDiff = (a,b)=> Math.round((new Date(b+'T00:00:00Z')-new Date(a+'T00:00:00Z'))/86400000);
+function injuryHistory(i){
+  if(Array.isArray(i.history) && i.history.length) return [...i.history].sort((a,b)=>a.date.localeCompare(b.date));
+  const base=[{date:i.date, status:'Lesión registrada', note:'Registro inicial', auto:true}];
+  if(i.status==='De alta' && i.dischargeDate) base.push({date:i.dischargeDate, status:'De alta', note:''});
+  return base;
+}
+function injuryEnd(i){ return i.status==='De alta' ? (i.dischargeDate||null) : todayStr(); }
+function injuryMissingDischarge(i){ return i.status==='De alta' && !i.dischargeDate; }
+function injuryDays(i){ const e=injuryEnd(i); return e ? Math.max(0, dayDiff(i.date,e)) : null; }
+/* Duración promedio de una sesión, calculada con los minutos que cargaron las jugadoras */
+function avgSessionMinutes(){
+  const tr=[], ma=[];
+  (STATE.wellness||[]).forEach(w=>{
+    if(w.postDone===false) return;
+    const t=Number(w.fitness||0)+Number(w.ball||0), m=Number(w.match||0);
+    if(!w.isMatch && t>0) tr.push(t);
+    if(m>0) ma.push(m);
+  });
+  const mean=a=>a.length? a.reduce((x,y)=>x+y,0)/a.length : null;
+  return {train: mean(tr)||90, match: mean(ma)||60, trainReal: tr.length>0, matchReal: ma.length>0};
+}
+function injuryMissed(i, avg){
+  const p=getPlayer(i.playerId); const e=injuryEnd(i);
+  const out={train:0, match:0, minutes:0, hours:0, known:false};
+  if(!e || !p) return out;
+  const cats=playerCategories(p);
+  (STATE.events||[]).forEach(ev=>{
+    if(ev.date<i.date || ev.date>e) return;
+    if(ev.category!=='Ambas' && !cats.includes(ev.category)) return;
+    if(ev.type==='Entrenamiento') out.train++;
+    else if(ev.type==='Partido') out.match++;
+  });
+  out.minutes = Math.round(out.train*avg.train + out.match*avg.match);
+  out.hours = out.minutes/60;
+  return out;
+}
+function injuryStats(){
+  const avg=avgSessionMinutes();
+  const rows=STATE.injuries.map(i=>{ const p=getPlayer(i.playerId); return {i, p, days:injuryDays(i), missed:injuryMissed(i,avg), hist:injuryHistory(i), missingEnd:injuryMissingDischarge(i)}; });
+  const closed=rows.filter(r=>r.i.status==='De alta' && r.i.dischargeDate);
+  const active=rows.filter(r=>r.i.status!=='De alta');
+  const sum=a=>a.reduce((x,y)=>x+y,0);
+  const bySev={};
+  closed.forEach(r=>{ (bySev[r.i.severity]=bySev[r.i.severity]||[]).push(r.days); });
+  const byZone={};
+  rows.forEach(r=>{ if(r.days===null) return; const z=r.i.zone||'Sin especificar'; (byZone[z]=byZone[z]||{n:0,days:0,hours:0}); byZone[z].n++; byZone[z].days+=r.days; byZone[z].hours+=r.missed.hours; });
+  return { avg, rows, closed, active,
+    avgDaysClosed: closed.length? sum(closed.map(r=>r.days))/closed.length : null,
+    totalDays: sum(rows.filter(r=>r.days!==null).map(r=>r.days)),
+    totalTrain: sum(rows.map(r=>r.missed.train)), totalMatch: sum(rows.map(r=>r.missed.match)),
+    totalHours: sum(rows.map(r=>r.missed.hours)),
+    missingEnd: rows.filter(r=>r.missingEnd).length,
+    bySev, byZone };
+}
+const fmtHs = h => h>=10 ? Math.round(h)+' h' : h.toFixed(1)+' h';
+function injuryTrackingHTML(r){
+  const i=r.i, h=r.hist;
+  const state = i.status==='De alta'
+    ? (i.dischargeDate ? `<span class="badge ok">Alta el ${fmtDate(i.dischargeDate)}</span> <b>${r.days} días</b> de baja` : `<span class="badge warn">Falta la fecha de alta</span> <span class="muted">Editá la lesión para cargarla y calcular el tiempo de baja.</span>`)
+    : `<span class="badge warn">En curso</span> <b>${r.days} días</b> desde el inicio`;
+  const chips = h.map((x,idx)=>`<span class="inj-step"><b>${fmtDate(x.date)}</b> ${x.status}${x.stage!==undefined?` · ${RTP_STAGES[x.stage]||''}`:''}${x.note&&!x.auto?`<i> — ${x.note}</i>`:''}</span>`).join('<span class="inj-arrow">→</span>');
+  const nChanges = (Array.isArray(i.history)? i.history.length-1 : 0);
+  return `<div class="inj-track">
+    <div style="font-size:12.5px;">${state}</div>
+    <div class="inj-stats">
+      <div><div class="inj-n">${r.missed.train}</div><div class="inj-l">entrenamientos perdidos</div></div>
+      <div><div class="inj-n">${r.missed.match}</div><div class="inj-l">partidos perdidos</div></div>
+      <div><div class="inj-n">${fmtHs(r.missed.hours)}</div><div class="inj-l">horas estimadas</div></div>
+      <div><div class="inj-n">${nChanges}</div><div class="inj-l">cambios de estado</div></div>
+    </div>
+    <details class="inj-hist"><summary>Ver seguimiento (${h.length} ${h.length===1?'registro':'registros'})</summary><div class="inj-steps">${chips}</div>${(!Array.isArray(i.history)||i.history.length<2)?'<div class="muted" style="font-size:11px; margin-top:6px;">Todavía no se registraron cambios de estado desde la carga. Desde ahora cada cambio de estado o etapa queda guardado con su fecha.</div>':''}</details>
+  </div>`;
+}
+
+function injurySummaryHTML(){
+  const st=injuryStats();
+  return `<div class="card" style="margin-bottom:14px;"><h3 style="margin-bottom:4px;">Tiempo de baja</h3>
+    <div class="section-sub">Desde que se registra la lesión hasta el alta. Las horas son una estimación: sesiones del calendario que la jugadora se perdió × duración promedio que cargó el plantel (entrenamiento ${Math.round(st.avg.train)} min · partido ${Math.round(st.avg.match)} min${st.avg.trainReal&&st.avg.matchReal?'':' — valores por defecto donde aún no hay datos'}). El calendario tiene datos desde el 15/8.</div>
+    <div class="inj-stats big">
+      <div><div class="inj-n">${st.active.length}</div><div class="inj-l">lesiones activas</div></div>
+      <div><div class="inj-n">${st.avgDaysClosed!==null?st.avgDaysClosed.toFixed(0):'—'}</div><div class="inj-l">días promedio hasta el alta</div></div>
+      <div><div class="inj-n">${st.totalDays}</div><div class="inj-l">días de baja acumulados</div></div>
+      <div><div class="inj-n">${st.totalTrain+st.totalMatch}</div><div class="inj-l">sesiones perdidas (${st.totalTrain} entr. · ${st.totalMatch} part.)</div></div>
+      <div><div class="inj-n">${fmtHs(st.totalHours)}</div><div class="inj-l">horas estimadas perdidas</div></div>
+    </div>
+    ${st.missingEnd?`<div class="muted" style="font-size:12px; margin-top:10px;">⚠️ ${st.missingEnd} lesión(es) dada(s) de alta sin fecha de alta: no entran en los promedios hasta que la completes. <button type="button" class="btn sm" id="btn-bulk-alta" style="margin-left:6px;">Completar fechas de alta</button></div>`:''}
+  </div>`;
+}
 function viewInjuries(){
   const sorted = [...STATE.injuries].sort((a,b)=>b.date.localeCompare(a.date));
   return `
@@ -3965,8 +4069,10 @@ function viewInjuries(){
       <button class="btn" id="btn-add-injury">+ Registrar lesión</button>
     </div>
   </div>
+  ${injurySummaryHTML()}
   <div class="card">
     ${sorted.map(i=>{ const p = getPlayer(i.playerId); const stage = i.stage!==undefined?i.stage:0; const pct = Math.round((stage/(RTP_STAGES.length-1))*100);
+      const _avg = avgSessionMinutes(); const _r = {i, days:injuryDays(i), missed:injuryMissed(i,_avg), hist:injuryHistory(i)};
       return `<div class="injury-row" style="align-items:center;">
         <div class="sev-dot" style="background:${sevColor(i.severity)}"></div>
         <div style="flex:1;">
@@ -3975,6 +4081,7 @@ function viewInjuries(){
           <div style="font-size:11.5px;"><span class="badge ${sevBadgeClass(i.severity)}">${i.severity}</span><span class="badge info">${i.zone||'Sin especificar'}</span><span class="badge ${i.kinesio?'info':'warn'}">${i.kinesio?'Asiste a kinesiología':'No asiste a kinesiología'}</span> <span class="muted">Desde ${fmtDate(i.date)}</span></div>
           <div class="muted" style="font-size:11px; margin-top:8px;">Protocolo RTP: ${RTP_STAGES[stage]} (${stage+1}/${RTP_STAGES.length})</div>
           <div class="progress-bar"><div style="width:${pct}%;"></div></div>
+          ${injuryTrackingHTML(_r)}
         </div>
         <button class="btn ghost sm" data-editinj="${i.id}">Editar</button>
       </div>`; }).join('') || '<div class="empty-state">Sin lesiones registradas.</div>'}
@@ -3982,6 +4089,34 @@ function viewInjuries(){
 }
 function sevBadgeClass(sev){ return sev==='Grave'?'danger':sev==='Moderada'?'warn':'ok'; }
 const INJURY_ZONES = ['Tobillo','Rodilla','Isquiotibiales','Cuádriceps','Gemelo/Pantorrilla','Cadera/Ingle','Columna/Espalda baja','Hombro','Codo/Muñeca/Mano','Cabeza/Cara','Otra zona'];
+function openBulkAltaModal(){
+  const modal=document.getElementById('modal-root');
+  const list=STATE.injuries.filter(injuryMissingDischarge).sort((a,b)=>a.date.localeCompare(b.date));
+  modal.innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal" style="position:relative; max-width:640px;">
+    <button class="close-x" id="modal-close">✕</button>
+    <h3>Completar fechas de alta</h3>
+    <div class="section-sub">Cargá la fecha en que cada jugadora recibió el alta. Las que dejes vacías quedan pendientes. No se modifica ningún otro dato.</div>
+    ${list.map(i=>{const p=getPlayer(i.playerId);return `<div class="field-wrap" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <div style="flex:1 1 260px;"><b>${p?p.name:'?'}</b><div class="muted" style="font-size:12px;">${i.type} · inicio ${fmtDate(i.date)}</div></div>
+      <input type="date" data-bulkalta="${i.id}" min="${i.date}" max="${todayStr()}" style="width:auto;"></div>`;}).join('')}
+    <button class="btn" id="bulk-save">Guardar fechas</button></div></div>`;
+  document.getElementById('modal-close').onclick=closeModal;
+  document.getElementById('modal-overlay').onclick=(e)=>{ if(e.target.id==='modal-overlay') closeModal(); };
+  document.getElementById('bulk-save').onclick=async ()=>{
+    let n=0;
+    document.querySelectorAll('[data-bulkalta]').forEach(inp=>{
+      const v=inp.value; if(!v) return;
+      const inj=STATE.injuries.find(x=>x.id===inp.dataset.bulkalta); if(!inj) return;
+      if(v<inj.date) return;
+      inj.dischargeDate=v;
+      const hist=Array.isArray(inj.history)&&inj.history.length ? inj.history : [{date:inj.date, status:'Lesión registrada', note:'Estado inicial sin detalle'}];
+      if(!hist.some(h=>h.status==='De alta')) hist.push({date:v, status:'De alta', stage:(inj.stage!==undefined?inj.stage:4), note:''});
+      inj.history=hist; n++;
+    });
+    if(!n){ toast('No cargaste ninguna fecha'); return; }
+    await saveInjuries(); closeModal(); toast(n+' fecha(s) de alta guardada(s)'); renderScoreboard(); render();
+  };
+}
 function openInjuryModal(existing){
   const modal = document.getElementById('modal-root');
   const i = existing || {id:null, playerId:STATE.players[0].id, date:todayStr(), type:'', zone:INJURY_ZONES[0], severity:'Leve', description:'', kinesio:false, status:'En recuperación', stage:0};
@@ -4002,6 +4137,11 @@ function openInjuryModal(existing){
         <div class="field-wrap"><label class="field">Estado</label><select id="inj-status"><option ${i.status==='En evaluación'?'selected':''}>En evaluación</option><option ${i.status==='En recuperación'?'selected':''}>En recuperación</option><option ${i.status==='De alta'?'selected':''}>De alta</option></select></div>
       </div>
       <div class="field-wrap"><label class="field">Etapa del protocolo de retorno al juego (RTP)</label><select id="inj-stage">${RTP_STAGES.map((s,idx)=>`<option value="${idx}" ${(i.stage!==undefined?i.stage:0)===idx?'selected':''}>${idx+1}. ${s}</option>`).join('')}</select></div>
+      <div class="row" id="inj-alta-row" style="display:none;">
+        <div class="field-wrap"><label class="field">Fecha de alta</label><input type="date" id="inj-discharge" value="${i.dischargeDate||''}"></div>
+      </div>
+      <div class="field-wrap"><label class="field">Nota del cambio (opcional)</label><input id="inj-note" placeholder="Ej: pasó a readaptación con el PF"></div>
+      ${existing? `<div class="muted" style="font-size:11.5px; margin-bottom:10px;">Si cambiás el estado o la etapa, queda guardado en el seguimiento con la fecha de hoy (o la fecha de alta).</div>`:''}
       <div class="field-wrap"><label class="field"><input type="checkbox" id="inj-kine" style="width:auto; display:inline-block;" ${i.kinesio?'checked':''}> Asiste a kinesiología</label></div>
       <div style="display:flex; gap:10px; align-items:center;">
         <button class="btn" id="inj-save">${existing?'Guardar cambios':'Registrar lesión'}</button>
@@ -4011,11 +4151,33 @@ function openInjuryModal(existing){
   </div>`;
   document.getElementById('modal-close').onclick = closeModal;
   document.getElementById('modal-overlay').onclick = (e)=>{ if(e.target.id==='modal-overlay') closeModal(); };
+  const _toggleAlta = (fill)=>{ const isAlta=document.getElementById('inj-status').value==='De alta'; document.getElementById('inj-alta-row').style.display=isAlta?'':'none'; const dd=document.getElementById('inj-discharge'); if(fill && isAlta && !dd.value) dd.value=todayStr(); };
+  document.getElementById('inj-status').addEventListener('change',()=>_toggleAlta(true)); _toggleAlta(false);
   document.getElementById('inj-save').onclick = async ()=>{
+    const _status = document.getElementById('inj-status').value, _stage = Number(document.getElementById('inj-stage').value), _date = document.getElementById('inj-date').value;
+    const _dis = document.getElementById('inj-discharge').value, _note = document.getElementById('inj-note').value.trim();
+    if(_status==='De alta'){
+      if(!_dis){ toast('Cargá la fecha de alta'); return; }
+      if(_dis<_date){ toast('La fecha de alta no puede ser anterior al inicio de la lesión'); return; }
+    }
     const data = { id: i.id || uid(), playerId: document.getElementById('inj-player').value, type: document.getElementById('inj-type').value.trim()||'Lesión sin especificar',
       zone: document.getElementById('inj-zone').value,
       date: document.getElementById('inj-date').value, description: document.getElementById('inj-desc').value.trim(), severity: document.getElementById('inj-sev').value,
-      status: document.getElementById('inj-status').value, stage: Number(document.getElementById('inj-stage').value), kinesio: document.getElementById('inj-kine').checked };
+      status: _status, stage: _stage, kinesio: document.getElementById('inj-kine').checked };
+    if(_status==='De alta') data.dischargeDate = _dis;
+    // seguimiento: historial de cambios de estado / etapa
+    let hist = Array.isArray(i.history) ? i.history.map(x=>({...x})) : [];
+    if(!existing){
+      hist = [{date:_date, status:_status, stage:_stage, note:_note||'Registro inicial'}];
+      if(_status==='De alta') hist.push({date:_dis, status:'De alta', stage:_stage, note:''});
+    } else {
+      let base;
+      if(!hist.length){ hist = [{date:i.date, status:'Lesión registrada', note:'Estado inicial sin detalle'}]; base = {status:i.status, stage:(i.stage!==undefined?i.stage:0)}; }
+      else base = hist[hist.length-1];
+      const changed = base.status!==_status || base.stage!==_stage;
+      if(changed) hist.push({date: _status==='De alta' ? _dis : todayStr(), status:_status, stage:_stage, note:_note});
+    }
+    data.history = hist;
     if(existing){ const idx=STATE.injuries.findIndex(x=>x.id===i.id); STATE.injuries[idx]=data; } else STATE.injuries.push(data);
     await saveInjuries(); closeModal(); toast('Lesión guardada'); renderScoreboard(); render();
   };
@@ -4076,7 +4238,7 @@ function renderReportTab(){
     const excelBtn = document.getElementById('btn-excel-medical');
     if(excelBtn) excelBtn.addEventListener('click', ()=>{
       exportToExcel('informe-medico-pincha-data.xlsx', {
-        Lesiones: STATE.injuries.map(i=>{ const p=getPlayer(i.playerId); return {Jugadora:p?p.name:'?', Puesto:p?playerPositionsLabel(p):'?', Categoria:p?playerCategoriesLabel(p):'?', Tipo:i.type, Zona:i.zone||'Sin especificar', Fecha:i.date, Gravedad:i.severity, Estado:i.status, Kinesiologia:i.kinesio?'Sí':'No'}; })
+        Lesiones: STATE.injuries.map(i=>{ const p=getPlayer(i.playerId); return {Jugadora:p?p.name:'?', Puesto:p?playerPositionsLabel(p):'?', Categoria:p?playerCategoriesLabel(p):'?', Tipo:i.type, Zona:i.zone||'Sin especificar', Fecha:i.date, FechaAlta:i.dischargeDate||'', DiasBaja:injuryDays(i)===null?'':injuryDays(i), EntrenamientosPerdidos:injuryMissed(i,avgSessionMinutes()).train, PartidosPerdidos:injuryMissed(i,avgSessionMinutes()).match, HorasPerdidasEst:Number(injuryMissed(i,avgSessionMinutes()).hours.toFixed(1)), Historial:injuryHistory(i).map(h=>h.date+' '+h.status).join(' > '), Gravedad:i.severity, Estado:i.status, Kinesiologia:i.kinesio?'Sí':'No'}; })
       });
     });
     const printBtn = document.getElementById('btn-print-medical');
@@ -4441,6 +4603,7 @@ function medicalReportHTML(){
     <div class="section-sub">Jugadoras con más de una lesión registrada en la misma zona</div>
     ${e.recurrence.length? e.recurrence.map(r=>`<div class="injury-row"><span class="badge danger">${r.count}x</span><div style="flex:1;"><b>${r.player.name}</b><div class="muted" style="font-size:12px;">${r.zone}</div></div></div>`).join('') : '<div class="empty-state">Sin recurrencias detectadas por ahora.</div>'}
   </div>
+  ${medicalTrackingHTML()}
   <div class="card report-block only-desktop"><h3>Detalle de lesiones históricas</h3>
     <div class="section-sub">Vista completa — todas las lesiones registradas, para consulta del cuerpo médico</div>
     <table><thead><tr><th>Jugadora</th><th>Puesto</th><th>Tipo</th><th>Zona</th><th>Gravedad</th><th>Fecha</th><th>Estado</th><th>Kinesiología</th></tr></thead>
@@ -4452,6 +4615,35 @@ function medicalReportHTML(){
   <div class="no-print" style="display:flex; gap:10px; flex-wrap:wrap;">
     <button class="btn secondary" id="btn-print-medical">Imprimir</button>
     <button class="btn secondary" id="btn-excel-medical">Exportar a Excel</button>
+  </div>`;
+}
+function medicalTrackingHTML(){
+  const st=injuryStats();
+  if(!st.rows.length) return '';
+  const sevOrder=['Leve','Moderada','Grave'];
+  const rows=[...st.rows].sort((a,b)=>b.i.date.localeCompare(a.i.date));
+  return `<div class="card report-block"><h3>Seguimiento y tiempo de baja</h3>
+    <div class="section-sub">Desde el registro hasta el alta. Horas estimadas = sesiones del calendario perdidas × duración promedio cargada por el plantel (entrenamiento ${Math.round(st.avg.train)} min · partido ${Math.round(st.avg.match)} min). Calendario disponible desde el 15/8.</div>
+    <div class="grid grid-4">
+      <div class="kpi-color-card" style="border-left-color:#c8102e;"><div class="muted" style="font-size:11px;">DÍAS PROMEDIO HASTA EL ALTA</div><div class="kpi-big">${st.avgDaysClosed!==null?st.avgDaysClosed.toFixed(0):'—'}</div><div class="muted" style="font-size:11px;">${st.closed.length} alta(s) con fecha</div></div>
+      <div class="kpi-color-card" style="border-left-color:#e3a857;"><div class="muted" style="font-size:11px;">DÍAS DE BAJA ACUMULADOS</div><div class="kpi-big">${st.totalDays}</div><div class="muted" style="font-size:11px;">${st.active.length} lesión(es) activa(s)</div></div>
+      <div class="kpi-color-card" style="border-left-color:#5f8ca7;"><div class="muted" style="font-size:11px;">SESIONES PERDIDAS</div><div class="kpi-big">${st.totalTrain+st.totalMatch}</div><div class="muted" style="font-size:11px;">${st.totalTrain} entrenam. · ${st.totalMatch} partidos</div></div>
+      <div class="kpi-color-card" style="border-left-color:#5fa777;"><div class="muted" style="font-size:11px;">HORAS ESTIMADAS PERDIDAS</div><div class="kpi-big">${fmtHs(st.totalHours)}</div><div class="muted" style="font-size:11px;">entrenamiento + partido</div></div>
+    </div>
+    ${st.missingEnd?`<div class="muted" style="font-size:12px; margin:10px 0;">⚠️ ${st.missingEnd} lesión(es) dada(s) de alta sin fecha de alta: completala desde Lesiones → Editar para que entre en los promedios.</div>`:''}
+    <h3 style="margin-top:16px;">Por gravedad</h3>
+    <table><thead><tr><th>Gravedad</th><th>Altas con fecha</th><th>Días promedio</th><th>Más corta</th><th>Más larga</th></tr></thead><tbody>
+      ${sevOrder.map(sv=>{ const a=st.bySev[sv]||[]; return `<tr><td>${sv}</td><td>${a.length}</td><td>${a.length?(a.reduce((x,y)=>x+y,0)/a.length).toFixed(0):'—'}</td><td>${a.length?Math.min(...a):'—'}</td><td>${a.length?Math.max(...a):'—'}</td></tr>`; }).join('')}
+    </tbody></table>
+    <h3 style="margin-top:16px;">Por zona del cuerpo</h3>
+    <table><thead><tr><th>Zona</th><th>Lesiones</th><th>Días de baja</th><th>Horas estimadas</th></tr></thead><tbody>
+      ${Object.entries(st.byZone).sort((a,b)=>b[1].days-a[1].days).map(([z,v])=>`<tr><td>${z}</td><td>${v.n}</td><td>${v.days}</td><td>${fmtHs(v.hours)}</td></tr>`).join('')}
+    </tbody></table>
+    <h3 style="margin-top:16px;">Seguimiento caso por caso</h3>
+    <div style="overflow-x:auto;"><table><thead><tr><th>Jugadora</th><th>Lesión</th><th>Inicio</th><th>Alta</th><th>Días</th><th>Entr.</th><th>Part.</th><th>Horas est.</th><th>Cambios de estado</th></tr></thead><tbody>
+      ${rows.map(r=>{ const i=r.i; const hist=r.hist; const tl=hist.map(x=>`${fmtDate(x.date)} ${x.status}`).join(' → ');
+        return `<tr><td>${r.p?r.p.name:'?'}</td><td>${i.type}</td><td>${fmtDate(i.date)}</td><td>${i.status==='De alta'?(i.dischargeDate?fmtDate(i.dischargeDate):'<span class="muted">sin fecha</span>'):'<span class="badge warn">en curso</span>'}</td><td>${r.days===null?'—':r.days}</td><td>${r.missed.train}</td><td>${r.missed.match}</td><td>${fmtHs(r.missed.hours)}</td><td style="font-size:11px;">${(Array.isArray(i.history)&&i.history.length>1)?tl:'<span class="muted">sin cambios registrados</span>'}</td></tr>`; }).join('')}
+    </tbody></table></div>
   </div>`;
 }
 function medicalInsight(e){
@@ -4468,6 +4660,7 @@ function medicalInsight(e){
   }
   if(e.recurrence.length) bullets.push(`Se detectaron ${e.recurrence.length} caso(s) de lesión recurrente en la misma zona — candidatas a revisar con kinesiología para descartar un factor de riesgo no resuelto.`);
   if(e.incidencePer1000h!==null) bullets.push(`La incidencia calculada es de ${e.incidencePer1000h.toFixed(1)} lesiones cada 1000 horas de exposición (entrenamiento + partido) registradas.`);
+  { const st=injuryStats(); if(st.avgDaysClosed!==null) bullets.push(`Las lesiones dadas de alta con fecha tardaron en promedio ${st.avgDaysClosed.toFixed(0)} días; en total el plantel acumula ${st.totalDays} días de baja y unas ${fmtHs(st.totalHours)} de entrenamiento/partido perdidas (estimación).`); }
   bullets.push('Recomendación: cruzar estos datos con el cuerpo técnico para ajustar la prevención específica en las zonas y puestos de mayor incidencia.');
   return bullets;
 }
@@ -6115,7 +6308,7 @@ function myInjuryView(){
         <div class="sev-dot" style="background:${sevColor(i.severity)}"></div>
         <div style="flex:1;">
           <div class="flex-between"><b>${i.type}</b><span class="badge ${i.status==='De alta'?'ok':i.status==='En recuperación'?'warn':'danger'}">${i.status}</span></div>
-          <div style="font-size:11.5px; margin-top:4px;"><span class="badge ${sevBadgeClass(i.severity)}">${i.severity}</span> <span class="muted">Desde ${fmtDate(i.date)}</span></div>
+          <div style="font-size:11.5px; margin-top:4px;"><span class="badge ${sevBadgeClass(i.severity)}">${i.severity}</span> <span class="muted">Desde ${fmtDate(i.date)}${injuryDays(i)!==null?' · '+injuryDays(i)+' días'+(i.status==='De alta'?' de baja':' en curso'):''}</span></div>
           <div class="muted" style="font-size:11px; margin-top:8px;">Protocolo de retorno al juego: ${RTP_STAGES[stage]}</div>
           <div class="progress-bar"><div style="width:${pct}%;"></div></div>
         </div>
@@ -6323,6 +6516,7 @@ function afterRender(){
   }
   if(currentView==='injuries'){
     document.getElementById('btn-add-injury').addEventListener('click',()=>openInjuryModal(null));
+    const _bk=document.getElementById('btn-bulk-alta'); if(_bk) _bk.addEventListener('click',openBulkAltaModal);
     document.querySelectorAll('[data-editinj]').forEach(btn=>btn.addEventListener('click',()=>{ const inj = STATE.injuries.find(i=>i.id===btn.dataset.editinj); openInjuryModal(inj); }));
     document.getElementById('btn-export-injuries').addEventListener('click',()=>{
       exportToExcel('lesiones-pincha-data.xlsx', {Lesiones: STATE.injuries.map(i=>({
