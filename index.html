@@ -549,6 +549,9 @@ input[type=range]::-moz-range-thumb{width:19px; height:19px; border-radius:50%; 
 .inj-step{font-size:11.5px; background:rgba(255,255,255,.05); border-radius:6px; padding:4px 8px;}
 .inj-step i{color:var(--ink-dim,#9a9c8f); font-style:normal;}
 .inj-arrow{color:var(--ink-dim,#9a9c8f);}
+table.day-wp td,table.day-wp th{white-space:nowrap; font-size:12px;}
+table.day-wp td[style*="font-size:11.5px"]{white-space:normal; min-width:170px; max-width:240px;}
+table.day-wp td:first-child,table.day-wp th:first-child{position:sticky; left:0; background:var(--bg-card,#161714); z-index:1;}
 </style>
 </head>
 <body>
@@ -967,7 +970,7 @@ function avg(arr){ const a=arr.filter(n=>!isNaN(n)); if(!a.length) return 0; ret
 /* =============================== FIREBASE CONFIG =============================== */
 /* Se actualiza cada vez que se genera una versión nueva del archivo — sirve para confirmar
    rápido, desde Ajustes, si lo que está publicado en GitHub es la última versión o no. */
-const APP_VERSION = "2026-11-03.2";
+const APP_VERSION = "2026-11-03.3";
 const firebaseConfig = {
   apiKey: "AIzaSyBxcxTN2PMGZEdhj1tJcyptwRX86yg2E1w",
   authDomain: "pincha-data.firebaseapp.com",
@@ -5038,6 +5041,68 @@ function eventCategoryBadge(e){
   const cls = cat==='Mayores' ? 'info' : 'warn';
   return `<span class="badge ${cls}">${cat}</span>`;
 }
+/* ---- Resultados de wellness y PSE de un día del calendario (solo PF) ---- */
+function dayWellnessHTML(ev){
+  if(ev.type!=='Partido' && ev.type!=='Entrenamiento') return '';
+  const isM = ev.type==='Partido';
+  const players = STATE.players.filter(p=>{ if(p.name==='Prueba Jugadora') return false; const c=playerCategories(p); return ev.category==='Ambas' || c.includes(ev.category); }).sort((a,b)=>a.name.localeCompare(b.name,'es'));
+  if(!players.length) return '';
+  const num = v=> (v===undefined||v===null||v===''||isNaN(Number(v))) ? null : Number(v);
+  const rows = players.map(p=>{
+    const w = STATE.wellness.find(x=>x.playerId===p.id && x.date===ev.date);
+    const pre = !!w && (w.preDone!==undefined ? !!w.preDone : true);
+    const post = !!w && isPostDone(w);
+    const injuredNow = STATE.injuries.some(i=>i.playerId===p.id && i.status!=='De alta' && i.date<=ev.date);
+    return {p, w, pre, post, injuredNow};
+  });
+  const nPre = rows.filter(r=>r.pre).length, nPost = rows.filter(r=>r.post).length, n = rows.length;
+  const mean = fn => { const v=rows.map(fn).filter(x=>x!==null&&x!==undefined&&!isNaN(x)); return v.length? v.reduce((a,b)=>a+b,0)/v.length : null; };
+  const f1 = x => x===null ? '—' : (Number.isInteger(x)? String(x) : x.toFixed(1));
+  const bad = (v,hi)=> v===null ? '' : (hi? (v>=4?'danger':v>=3?'warn':'ok') : (v<=2?'danger':v<=3?'warn':'ok'));
+  const cell = (v,hi)=> v===null ? '<span class="muted">—</span>' : `<span class="badge ${bad(v,hi)}">${f1(v)}</span>`;
+  const sleepCell = v=> v===null ? '<span class="muted">—</span>' : `<span class="badge ${v<6?'danger':v<7?'warn':'ok'}">${f1(v)}</span>`;
+  const pain = a=> (a&&a.length) ? a.map(x=>`${x.part} ${x.scale}`).join(', ') : '';
+  const lvl = (arr,v)=> (v!==null && arr[v-1]) ? `${arr[v-1].e} ${arr[v-1].l}` : '<span class="muted">—</span>';
+  const avgFat = mean(r=>r.pre?num(r.w.fatigue):null), avgSor = mean(r=>r.pre?num(r.w.soreness):null), avgMood = mean(r=>r.pre?num(r.w.mood):null), avgSleep = mean(r=>r.pre?num(r.w.sleepHours):null);
+  const avgLoad = mean(r=>r.post? sessionLoad(r.w):null);
+  const played = r=> r.post && (r.w.playedMatch===true || (r.w.playedMatch===undefined && Number(r.w.match||0)>0));
+  const avgPse = isM ? mean(r=> played(r)? num(r.w.rpePartido!==undefined? r.w.rpePartido : r.w.rpePelota):null)
+                     : mean(r=> r.post? (()=>{ const a=num(r.w.rpeFisico), b=num(r.w.rpePelota); const v=[a,b].filter(x=>x!==null&&x>0); return v.length? v.reduce((x,y)=>x+y,0)/v.length : null; })():null);
+  const kpi = (v,l)=>`<div><div class="inj-n">${v}</div><div class="inj-l">${l}</div></div>`;
+  const head = isM
+    ? '<th>Jugadora</th><th>Previa</th><th>Fatiga</th><th>Dolor</th><th>Ánimo</th><th>Sueño h</th><th>Disposición</th><th>Nervios</th><th>Molestias previas</th><th>PSE</th><th>Min.</th><th>Rendimiento</th><th>Dolor al terminar</th><th>Carga</th>'
+    : '<th>Jugadora</th><th>Previa</th><th>Fatiga</th><th>Dolor</th><th>Ánimo</th><th>Sueño h</th><th>Molestias previas</th><th>Estado PSE</th><th>PSE fís.</th><th>PSE pel.</th><th>Min. fís.</th><th>Min. pel.</th><th>Dolor al terminar</th><th>Carga</th>';
+  const body = rows.map(r=>{
+    const w=r.w, nm = `<b>${r.p.name}</b>${r.injuredNow?' <span class="badge warn" title="Lesión activa">lesionada</span>':''}`;
+    const preB = r.pre ? '<span class="badge ok">cargada</span>' : '<span class="badge danger">sin cargar</span>';
+    const postB = r.post ? '<span class="badge ok">cargada</span>' : (r.pre ? '<span class="badge warn">pendiente</span>' : '<span class="muted">—</span>');
+    const common = r.pre ? `<td>${cell(num(w.fatigue),true)}</td><td>${cell(num(w.soreness),true)}</td><td>${cell(num(w.mood),false)}</td><td>${sleepCell(num(w.sleepHours))}</td>` : '<td colspan="4" class="muted">—</td>';
+    const painPre = r.pre ? (pain(w.painAreas)||'<span class="muted">sin molestias</span>') : '<span class="muted">—</span>';
+    const painPost = r.post ? (w.postPain ? `<span class="badge danger">${pain(w.postPainAreas)||'con dolor'}</span>` : '<span class="muted">no</span>') : '<span class="muted">—</span>';
+    const load = r.post ? Math.round(sessionLoad(w)) : null;
+    if(isM){
+      const pl = r.post ? (played(r)?true:(w.playedMatch===false?false:null)) : null;
+      const pse = r.post && pl ? num(w.rpePartido!==undefined? w.rpePartido : w.rpePelota) : null;
+      return `<tr><td>${nm}</td><td>${preB}</td>${common}<td>${r.pre?lvl(READY_LEVELS,num(w.matchReady)):'<span class="muted">—</span>'}</td><td>${r.pre?lvl(NERVES_LEVELS,num(w.matchNerves)):'<span class="muted">—</span>'}</td><td style="font-size:11.5px;">${painPre}</td>
+        <td>${r.post? (pl===false?'<span class="muted">no jugó</span>':(pse!==null?`<span class="badge info">${pse}</span>`:'<span class="muted">—</span>')) : postB}</td><td>${r.post&&pl?(Number(w.match)||'—'):'<span class="muted">—</span>'}</td><td>${r.post&&pl?lvl(RATING_LEVELS,num(w.matchRating)):'<span class="muted">—</span>'}</td><td>${painPost}</td><td>${load!==null&&pl?load:'<span class="muted">—</span>'}</td></tr>`;
+    }
+    const a=num(w&&w.rpeFisico), b=num(w&&w.rpePelota), mf=num(w&&w.fitness), mp=num(w&&w.ball);
+    return `<tr><td>${nm}</td><td>${preB}</td>${common}<td style="font-size:11.5px;">${painPre}</td><td>${postB}</td>
+      <td>${r.post&&a!==null?`<span class="badge info">${a}</span>`:'<span class="muted">—</span>'}</td><td>${r.post&&b!==null?`<span class="badge info">${b}</span>`:'<span class="muted">—</span>'}</td><td>${r.post?(mf||0):'<span class="muted">—</span>'}</td><td>${r.post?(mp||0):'<span class="muted">—</span>'}</td><td>${painPost}</td><td>${load!==null?load:'<span class="muted">—</span>'}</td></tr>`;
+  }).join('');
+  const labelCat = ev.category==='Ambas' ? 'Plantel' : ev.category;
+  return `<div class="card" style="margin-top:14px;">
+    <h3 style="margin-bottom:4px;">${isM?'Previa y post del partido':'Wellness y PSE del entrenamiento'} · ${labelCat}</h3>
+    <div class="section-sub">Resultados cargados por las jugadoras ese día. Escala 1-5: en fatiga y dolor más alto es peor; en ánimo, más alto es mejor.</div>
+    <div class="inj-stats big">
+      ${kpi(`${nPre}/${n}`,`wellness cargado (${Math.round(100*nPre/n)}%)`)}
+      ${kpi(`${nPost}/${n}`,`PSE cargada (${Math.round(100*nPost/n)}%)`)}
+      ${kpi(f1(avgFat),'fatiga media')}${kpi(f1(avgSor),'dolor muscular medio')}${kpi(f1(avgMood),'ánimo medio')}${kpi(f1(avgSleep),'sueño medio (h)')}
+      ${kpi(f1(avgPse),'PSE media')}${kpi(avgLoad===null?'—':Math.round(avgLoad),'carga media')}
+    </div>
+    <div style="overflow-x:auto;"><table class="day-wp"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
+  </div>`;
+}
 function dayDetailHTML(dateStr){
   const evs = eventsOn(dateStr);
   return `
@@ -5047,7 +5112,8 @@ function dayDetailHTML(dateStr){
       ${e.type==='Partido' ? teamLogoHTML(e, 40) : `<div class="cal-day-event-icon">${eventIcon(e.type)}</div>`}
       <div style="flex:1;"><b>${e.label}</b> ${eventCategoryBadge(e)}${e.venue?` <span class="muted" style="font-size:12px;">${venueIcon(e.venue)} ${e.venue}</span>`:''}<div class="muted" style="font-size:12px;">${e.type}${e.notes?' · '+e.notes:''}</div></div>
       ${SESSION.role==='pf'? `<button class="btn ghost sm" data-delevent="${e.id}">Eliminar</button>` : ''}
-    </div>`).join('') : '<div class="empty-state">Sin eventos este día.</div>'}`;
+    </div>`).join('') : '<div class="empty-state">Sin eventos este día.</div>'}
+  ${SESSION.role==='pf' ? evs.map(dayWellnessHTML).join('') : ''}`;
 }
 function wireCalendarBody(){
   document.querySelectorAll('[data-caldate]').forEach(el=>el.addEventListener('click',()=>{
