@@ -970,7 +970,7 @@ function avg(arr){ const a=arr.filter(n=>!isNaN(n)); if(!a.length) return 0; ret
 /* =============================== FIREBASE CONFIG =============================== */
 /* Se actualiza cada vez que se genera una versión nueva del archivo — sirve para confirmar
    rápido, desde Ajustes, si lo que está publicado en GitHub es la última versión o no. */
-const APP_VERSION = "2026-11-03.3";
+const APP_VERSION = "2026-11-04.1";
 const firebaseConfig = {
   apiKey: "AIzaSyBxcxTN2PMGZEdhj1tJcyptwRX86yg2E1w",
   authDomain: "pincha-data.firebaseapp.com",
@@ -2374,7 +2374,7 @@ function navigate(view, slideDir){
   // Al entrar a Wellness desde el menú (no desde los botones internos de "completar día"),
   // siempre arrancamos en HOY — así nunca se queda pegado en una fecha vieja de una
   // navegación anterior, y respeta el orden: primero el wellness de hoy, después su PSE.
-  if(view==='wellness'){ wellnessTargetDate = todayStr(); wellnessForceEdit = null; wellnessVoluntaryToday = false; }
+  if(view==='wellness'){ wellnessTargetDate = todayStr(); wellnessForceEdit = null; wellnessVoluntaryToday = false; wellnessAsMatchDate = null; }
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active', b.dataset.view===view));
   document.querySelectorAll('.bottom-nav-btn[data-view]').forEach(b=>b.classList.toggle('active', b.dataset.view===view));
   const moreBtn = document.getElementById('bottom-nav-more');
@@ -2811,8 +2811,15 @@ function mhRow(ev, p){
   r.painPost = (w.postPainAreas||[]).map(a=>`${a.part} ${a.scale}/10`).join(', ');
   return r;
 }
+function playersForMatchEvent(ev){
+  return STATE.players.filter(p=>{
+    const cats=playerCategories(p);
+    if(ev.category==='Ambas' || cats.includes(ev.category)) return true;
+    return STATE.wellness.some(w=>w.playerId===p.id && w.date===ev.date && w.isMatch && w.otherCategoryMatch);
+  });
+}
 function mhRowsForEvent(ev){
-  return STATE.players.filter(p=>{ const cats=playerCategories(p); return ev.category==='Ambas' || cats.includes(ev.category); })
+  return playersForMatchEvent(ev)
     .sort((a,b)=>a.name.localeCompare(b.name,'es')).map(p=>mhRow(ev,p));
 }
 function mhAvg(rows, key){
@@ -2968,9 +2975,9 @@ function pfMatchCardHTML(){
   let missingPre = 0, missingPost = 0;
   STATE.players.forEach(p=>{
     const cats = playerCategories(p);
-    const ev = evs.find(e=>e.category==='Ambas' || cats.includes(e.category));
-    if(!ev) return;
     const w = STATE.wellness.find(x=>x.playerId===p.id && x.date===lastDate);
+    const ev = evs.find(e=>e.category==='Ambas' || cats.includes(e.category)) || ((w && w.isMatch && w.otherCategoryMatch) ? evs[0] : null);
+    if(!ev) return;
     const hasPre = !!(w && (w.preDone!==undefined ? w.preDone : true));
     const hasPost = !!(w && isPostDone(w));
     if(!hasPre) missingPre++; if(!hasPost) missingPost++;
@@ -5045,7 +5052,7 @@ function eventCategoryBadge(e){
 function dayWellnessHTML(ev){
   if(ev.type!=='Partido' && ev.type!=='Entrenamiento') return '';
   const isM = ev.type==='Partido';
-  const players = STATE.players.filter(p=>{ if(p.name==='Prueba Jugadora') return false; const c=playerCategories(p); return ev.category==='Ambas' || c.includes(ev.category); }).sort((a,b)=>a.name.localeCompare(b.name,'es'));
+  const players = (isM ? playersForMatchEvent(ev) : STATE.players.filter(p=>{ const c=playerCategories(p); return ev.category==='Ambas' || c.includes(ev.category); })).filter(p=>p.name!=='Prueba Jugadora').sort((a,b)=>a.name.localeCompare(b.name,'es'));
   if(!players.length) return '';
   const num = v=> (v===undefined||v===null||v===''||isNaN(Number(v))) ? null : Number(v);
   const rows = players.map(p=>{
@@ -5053,7 +5060,7 @@ function dayWellnessHTML(ev){
     const pre = !!w && (w.preDone!==undefined ? !!w.preDone : true);
     const post = !!w && isPostDone(w);
     const injuredNow = STATE.injuries.some(i=>i.playerId===p.id && i.status!=='De alta' && i.date<=ev.date);
-    return {p, w, pre, post, injuredNow};
+    return {p, w, pre, post, injuredNow, cross: !!(w && w.otherCategoryMatch)};
   });
   const nPre = rows.filter(r=>r.pre).length, nPost = rows.filter(r=>r.post).length, n = rows.length;
   const mean = fn => { const v=rows.map(fn).filter(x=>x!==null&&x!==undefined&&!isNaN(x)); return v.length? v.reduce((a,b)=>a+b,0)/v.length : null; };
@@ -5073,7 +5080,7 @@ function dayWellnessHTML(ev){
     ? '<th>Jugadora</th><th>Previa</th><th>Fatiga</th><th>Dolor</th><th>Ánimo</th><th>Sueño h</th><th>Disposición</th><th>Nervios</th><th>Molestias previas</th><th>PSE</th><th>Min.</th><th>Rendimiento</th><th>Dolor al terminar</th><th>Carga</th>'
     : '<th>Jugadora</th><th>Previa</th><th>Fatiga</th><th>Dolor</th><th>Ánimo</th><th>Sueño h</th><th>Molestias previas</th><th>Estado PSE</th><th>PSE fís.</th><th>PSE pel.</th><th>Min. fís.</th><th>Min. pel.</th><th>Dolor al terminar</th><th>Carga</th>';
   const body = rows.map(r=>{
-    const w=r.w, nm = `<b>${r.p.name}</b>${r.injuredNow?' <span class="badge warn" title="Lesión activa">lesionada</span>':''}`;
+    const w=r.w, nm = `<b>${r.p.name}</b>${r.cross?' <span class="badge info" title="Jugó un partido de otra categoría">Liga</span>':''}${r.injuredNow?' <span class="badge warn" title="Lesión activa">lesionada</span>':''}`;
     const preB = r.pre ? '<span class="badge ok">cargada</span>' : '<span class="badge danger">sin cargar</span>';
     const postB = r.post ? '<span class="badge ok">cargada</span>' : (r.pre ? '<span class="badge warn">pendiente</span>' : '<span class="muted">—</span>');
     const common = r.pre ? `<td>${cell(num(w.fatigue),true)}</td><td>${cell(num(w.soreness),true)}</td><td>${cell(num(w.mood),false)}</td><td>${sleepCell(num(w.sleepHours))}</td>` : '<td colspan="4" class="muted">—</td>';
@@ -5992,6 +5999,19 @@ function isMatchDay(playerId, dateStr){
   const myCats = playerCategories(p);
   return STATE.events.some(e=> e.date===dateStr && e.type==='Partido' && (e.category==='Ambas' || myCats.includes(e.category)) );
 }
+/* Partido de otra categoría (ej: una Junior que juega la Liga de Mayores) */
+let wellnessAsMatchDate = null;
+function anyMatchEventOn(dateStr){ return STATE.events.find(e=>e.type==='Partido' && e.date===dateStr) || null; }
+function otherCategoryMatchOn(playerId, dateStr){
+  if(isMatchDay(playerId, dateStr)) return null;
+  return anyMatchEventOn(dateStr);
+}
+function treatAsMatch(playerId, dateStr){
+  if(isMatchDay(playerId, dateStr)) return true;
+  const w = STATE.wellness.find(x=>x.playerId===playerId && x.date===dateStr);
+  if(w && w.isMatch) return true;
+  return wellnessAsMatchDate===dateStr && !!anyMatchEventOn(dateStr);
+}
 function missingWellnessDays(playerId){
   const out = [];
   for(let i=1;i<=6;i++){
@@ -6007,8 +6027,8 @@ function missingPseDays(playerId){
   for(let i=1;i<=6;i++){
     const d = new Date(); d.setDate(d.getDate()-i);
     const ds = dateStrLocal(d);
-    if(!isTrainingOrMatchDay(playerId, ds)) continue;
     const entry = STATE.wellness.find(w=>w.playerId===playerId && w.date===ds);
+    if(!isTrainingOrMatchDay(playerId, ds) && !(entry && entry.isMatch)) continue;
     if(!entry) continue; // ese día ya se cuenta como wellness faltante por completo, no como PSE puntual
     const postDone = isPostDone(entry);
     if(!postDone) out.push(ds);
@@ -6020,7 +6040,7 @@ function emojiRow(name, levels, current){
 }
 function draftLoad(){
   const p = activePlayer();
-  if(p && isMatchDay(p.id, wellnessTargetDate||todayStr())){
+  if(p && treatAsMatch(p.id, wellnessTargetDate||todayStr())){
     return sessionLoad({ball:0, fitness:0, match: wellnessDraft.playedMatch===false ? 0 : wellnessDraft.match, rpePelota: wellnessDraft.rpePartido});
   }
   return sessionLoad(wellnessDraft);
@@ -6050,7 +6070,7 @@ function myCheckinsHTML(){
       return `
       <div class="injury-row" style="align-items:center; gap:8px; flex-wrap:wrap;">
         <div style="flex:1; min-width:140px;">
-          <b>${fmtDate(w.date)}${w.date===today?' · hoy':''}</b> ${match?'<span class="match-chip">Partido</span>':''}
+          <b>${fmtDate(w.date)}${w.date===today?' · hoy':''}</b> ${match?`<span class="match-chip">Partido${w.otherCategoryMatch?' · '+(w.matchCategory||'Liga'):''}</span>`:''}
           <div class="muted" style="font-size:12px;">Antes: ${hasPre?'✅':'—'} · Después (PSE): ${hasPost?'✅':'pendiente'}</div>
         </div>
         <button type="button" class="btn secondary sm" data-edit-day="${w.date}" data-edit-part="pre" style="padding:7px 12px; font-size:12.5px;">✏️ Wellness</button>
@@ -6140,6 +6160,17 @@ function viewWellnessMain(){
   // Hoy no hay entrenamiento ni partido programado en el calendario para esta jugadora
   // (pero si ya arrancó o completó su check-in de hoy, no le volvemos a preguntar — seguimos el flujo normal)
   if(isToday && !isTrainingOrMatchDay(p.id, targetDate) && !wellnessVoluntaryToday && !preDone){
+    const otherM = otherCategoryMatchOn(p.id, targetDate);
+    if(otherM){
+      return banners + `
+    <div class="card" style="margin-bottom:16px;">
+      <div class="match-banner"><span class="mb-ic">🥅</span><span>Hoy hay partido de ${otherM.category==='Ambas'?'el plantel':otherM.category}${otherM.opponent?` · vs ${otherM.opponent}`:''}</span></div>
+      <h3>¿Jugás o jugaste este partido?</h3>
+      <div class="section-sub">No es de tu categoría, así que no te pedimos nada automáticamente. Si lo jugás (por ejemplo, subís a la Liga), tocá el botón: se carga con el formato de partido, queda registrado y después podés cargar tu PSE.</div>
+      <button type="button" class="btn" id="btn-fill-voluntary-match" style="margin-top:10px;">Completar wellness de partido (Liga)</button>
+      <button type="button" class="btn secondary" id="btn-fill-voluntary" style="margin-top:10px;">Completar como entrenamiento</button>
+    </div>`;
+    }
     return banners + `
     <div class="card" style="margin-bottom:16px;">
       <h3>📅 Hoy no tenés entrenamiento ni partido programado</h3>
@@ -6157,7 +6188,7 @@ function viewWellnessMain(){
     return banners + (wellnessForceEdit==='post' ? editBannerHTML(targetDate,'post') : '') + (postDone ? '' : `
     <div class="card" style="margin-bottom:16px; border:1.5px solid var(--green); background:rgba(95,167,119,0.08);">
       <h3>✅ Ya completaste tu check-in de antes de la sesión</h3>
-      <div class="section-sub">${isMatchDay(p.id, targetDate) ? 'Ahora te falta cargar cómo te fue DESPUÉS del partido (minutos, PSE y molestias).' : 'Ahora te falta cargar cómo te sentiste DESPUÉS de entrenar (PSE, minutos y molestias).'}</div>
+      <div class="section-sub">${treatAsMatch(p.id, targetDate) ? 'Ahora te falta cargar cómo te fue DESPUÉS del partido (minutos, PSE y molestias).' : 'Ahora te falta cargar cómo te sentiste DESPUÉS de entrenar (PSE, minutos y molestias).'}</div>
     </div>`)
       + wellnessPostFormHTML(p, targetDate, isToday, myCats)
       + `<button class="btn save-wellness-btn" id="btn-save-wellness-post">💾 ${wellnessForceEdit==='post' ? 'Guardar cambios' : 'Guardar PSE de después de la sesión'}</button>`;
@@ -6173,10 +6204,17 @@ function viewWellnessMain(){
     <button class="btn secondary" id="btn-edit-post">✏️ Editar PSE de después</button>
   </div>`;
 }
+function crossMatchFields(playerId, dateStr){
+  if(isMatchDay(playerId, dateStr)) return {};
+  const ev = anyMatchEventOn(dateStr); if(!ev) return {};
+  const w = STATE.wellness.find(x=>x.playerId===playerId && x.date===dateStr);
+  if(!(w && w.isMatch) && wellnessAsMatchDate!==dateStr) return {};
+  return { otherCategoryMatch:true, matchEventId:ev.id, matchCategory:ev.category, dayCategory:ev.category };
+}
 function matchEventFor(playerId, dateStr){
   const p = getPlayer(playerId); if(!p) return null;
   const myCats = playerCategories(p);
-  return STATE.events.find(e=> e.date===dateStr && e.type==='Partido' && (e.category==='Ambas' || myCats.includes(e.category))) || null;
+  return STATE.events.find(e=> e.date===dateStr && e.type==='Partido' && (e.category==='Ambas' || myCats.includes(e.category))) || anyMatchEventOn(dateStr);
 }
 function minutesControlHTML(key, val, max, color){
   return `<input type="range" min="0" max="${max}" step="1" id="w-${key}" value="${val}" style="accent-color:${color};">
@@ -6208,7 +6246,7 @@ function postPainCardHTML(isMatch, isToday){
 }
 function wellnessPreFormHTML(p, targetDate, isToday, entry){
   const lastInjury = !entry ? getLastInjuryReport(p.id, targetDate) : null;
-  const esPartido = isMatchDay(p.id, targetDate);
+  const esPartido = treatAsMatch(p.id, targetDate);
   const matchEv = esPartido ? matchEventFor(p.id, targetDate) : null;
   return `
   <div class="card" style="margin-bottom:16px;">
@@ -6257,7 +6295,7 @@ function wellnessPreFormHTML(p, targetDate, isToday, entry){
   </div>`;
 }
 function wellnessPostFormHTML(p, targetDate, isToday, myCats){
-  const esDiaDePartido = isMatchDay(p.id, targetDate);
+  const esDiaDePartido = treatAsMatch(p.id, targetDate);
   const catSel = myCats.length>1? `<div class="field-wrap"><label class="field">¿Con qué categoría ${esDiaDePartido?'jugaste':'entrenaste/jugaste'}?</label><select id="w-daycategory">${myCats.map(c=>`<option ${wellnessDraft.dayCategory===c?'selected':''}>${c}</option>`).join('')}</select></div>` : '';
   if(esDiaDePartido){
     const played = wellnessDraft.playedMatch;
@@ -6721,8 +6759,9 @@ function afterRender(){
         injured: isInjured, kinesio: isInjured ? (document.getElementById('w-kine').value==='si') : false,
         injuryDesc: isInjured ? document.getElementById('w-injury-desc').value.trim() : '',
         painAreas: selectedPainAreas,
-        ...(isMatchDay(activePlayer().id, wellnessTargetDate||todayStr()) ? {
-          isMatch: true, matchReady: wellnessDraft.matchReady, matchNerves: wellnessDraft.matchNerves
+        ...(treatAsMatch(activePlayer().id, wellnessTargetDate||todayStr()) ? {
+          isMatch: true, matchReady: wellnessDraft.matchReady, matchNerves: wellnessDraft.matchNerves,
+          ...crossMatchFields(activePlayer().id, wellnessTargetDate||todayStr())
         } : {})
       };
     }
@@ -6735,12 +6774,12 @@ function afterRender(){
         postPain: !!wellnessDraft.postPain,
         postPainAreas: wellnessDraft.postPain ? selectedPostPainAreas : []
       };
-      if(isMatchDay(p.id, wellnessTargetDate||todayStr())){
+      if(treatAsMatch(p.id, wellnessTargetDate||todayStr())){
         // Día de partido: un único PSE (sin separar pelota y físico). Se guarda como rpePelota
         // para que la carga (PSE × minutos) y el ACWR sigan funcionando igual.
         const played = wellnessDraft.playedMatch===true;
         return {
-          ...base, isMatch: true, playedMatch: wellnessDraft.playedMatch,
+          ...base, ...crossMatchFields(p.id, wellnessTargetDate||todayStr()), isMatch: true, playedMatch: wellnessDraft.playedMatch,
           ball: 0, fitness: 0, match: played ? wellnessDraft.match : 0,
           rpePartido: played ? wellnessDraft.rpePartido : 0,
           matchRating: played ? wellnessDraft.matchRating : null,
@@ -6801,7 +6840,7 @@ function afterRender(){
       const wasEditing = !!wellnessForceEdit;
       const entryData = await persistWellness({...buildPreFields(), preDone:true});
       if(!entryData){ return; }
-      wellnessForceEdit = null; wellnessVoluntaryToday = false;
+      wellnessForceEdit = null; wellnessVoluntaryToday = false; wellnessAsMatchDate = null;
       const editedDate = wellnessTargetDate || todayStr();
       wellnessTargetDate = todayStr();
       if(wasEditing || editedDate!==todayStr()) toast('Cambios guardados ✅');
@@ -6810,7 +6849,7 @@ function afterRender(){
     });
     function matchAnswerMissing(){
       const pl = activePlayer();
-      if(isMatchDay(pl.id, wellnessTargetDate||todayStr()) && wellnessDraft.playedMatch===null){
+      if(treatAsMatch(pl.id, wellnessTargetDate||todayStr()) && wellnessDraft.playedMatch===null){
         toast('Indicá si jugaste el partido (Sí o No)'); return true;
       }
       return false;
@@ -6820,7 +6859,7 @@ function afterRender(){
       if(matchAnswerMissing()) return;
       const entryData = await persistWellness({...buildPostFields(), postDone:true});
       if(!entryData){ return; }
-      wellnessForceEdit = null; wellnessVoluntaryToday = false; wellnessTargetDate = todayStr();
+      wellnessForceEdit = null; wellnessVoluntaryToday = false; wellnessAsMatchDate = null; wellnessTargetDate = todayStr();
       const computed = computeAnalysisFromEntry(entryData);
       const rec = await upsertAnalysis(entryData.playerId, entryData.date, computed);
       showAnalysisModal(rec);
@@ -6859,6 +6898,8 @@ function afterRender(){
     if(editPreBtn) editPreBtn.addEventListener('click', ()=>{ wellnessForceEdit='pre'; render(); });
     const editPostBtn = document.getElementById('btn-edit-post');
     if(editPostBtn) editPostBtn.addEventListener('click', ()=>{ wellnessForceEdit='post'; render(); });
+    const fillVoluntaryMatchBtn = document.getElementById('btn-fill-voluntary-match');
+    if(fillVoluntaryMatchBtn) fillVoluntaryMatchBtn.addEventListener('click', ()=>{ wellnessVoluntaryToday = true; wellnessAsMatchDate = wellnessTargetDate||todayStr(); render(); });
     const fillVoluntaryBtn = document.getElementById('btn-fill-voluntary');
     if(fillVoluntaryBtn) fillVoluntaryBtn.addEventListener('click', ()=>{ wellnessVoluntaryToday = true; render(); });
   }
