@@ -970,7 +970,7 @@ function avg(arr){ const a=arr.filter(n=>!isNaN(n)); if(!a.length) return 0; ret
 /* =============================== FIREBASE CONFIG =============================== */
 /* Se actualiza cada vez que se genera una versión nueva del archivo — sirve para confirmar
    rápido, desde Ajustes, si lo que está publicado en GitHub es la última versión o no. */
-const APP_VERSION = "2026-11-04.1";
+const APP_VERSION = "2026-11-11.1";
 const firebaseConfig = {
   apiKey: "AIzaSyBxcxTN2PMGZEdhj1tJcyptwRX86yg2E1w",
   authDomain: "pincha-data.firebaseapp.com",
@@ -3140,8 +3140,8 @@ function playerProfileHTML(pid, withBack){
     ${Object.keys(byType).map(type=>{ const u=byType[type][0].unit; return `<div class="card"><h3>${type}${u?` <span class="muted" style="font-weight:400; font-size:11px;">(${u})</span>`:''}</h3><div class="chart-box"><canvas id="chart-profile-${slug(type)}"></canvas></div></div>`; }).join('') || '<div class="empty-state">Sin testeos cargados para esta jugadora.</div>'}
   </div>
   <div class="card" style="margin-top:16px;"><h3>Historial completo</h3>
-    <table><thead><tr><th>Fecha</th><th>Test</th><th>Valor</th></tr></thead>
-    <tbody>${myTests.slice().reverse().map(t=>`<tr><td>${fmtDate(t.date)}</td><td>${t.type}</td><td>${t.value}${t.unit?' '+t.unit:''}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">Sin registros</td></tr>'}</tbody></table>
+    <div style="overflow-x:auto;"><table><thead><tr><th>Fecha</th><th>Test</th><th>Valor</th>${withBack?'<th></th>':''}</tr></thead>
+    <tbody>${myTests.slice().reverse().map(t=>`<tr><td>${fmtDate(t.date)}</td><td>${t.type}</td><td>${t.value}${t.unit?' '+t.unit:''}</td>${withBack?`<td style="white-space:nowrap; text-align:right;">${testRowActionsHTML(t.id)}</td>`:''}</tr>`).join('') || `<tr><td colspan="${withBack?4:3}" class="muted">Sin registros</td></tr>`}</tbody></table></div>
   </div>
   ${withBack? gameStatsManagerHTML(pid) : ''}
   ${withBack? maxLiftsManagerHTML(pid) : ''}`;
@@ -3223,6 +3223,53 @@ async function deletePlayerCascade(pid){
   ]);
 }
 function slug(s){ return s.replace(/[^a-zA-Z0-9]/g,''); }
+const TEST_LIST_LIMIT = 15;
+let testListFilter = '';
+function testRowActionsHTML(id){
+  return `<button type="button" class="btn ghost sm" data-edittest="${id}" title="Editar" style="padding:5px 9px;">✏️</button> <button type="button" class="btn ghost sm" data-deltest="${id}" title="Borrar" style="padding:5px 9px;">🗑️</button>`;
+}
+function openEditTestModal(id){
+  const t = STATE.tests.find(x=>x.id===id); if(!t) return;
+  const p = getPlayer(t.playerId);
+  const modal = document.getElementById('modal-root');
+  modal.innerHTML = `<div class="modal-overlay" id="modal-overlay"><div class="modal" style="position:relative; max-width:520px;">
+    <button class="close-x" id="modal-close">✕</button>
+    <h3>Editar testeo</h3>
+    <div class="section-sub">${p?p.name:'Jugadora'}</div>
+    <div class="row">
+      <div class="field-wrap"><label class="field">Nombre del test</label><input id="et-type" list="tf-type-list" value="${(t.type||'').replace(/"/g,'&quot;')}">
+        <datalist id="tf-type-list">${getDistinctTestTypes().map(x=>`<option value="${x}">`).join('')}</datalist></div>
+      <div class="field-wrap"><label class="field">Unidad</label><input id="et-unit" value="${(t.unit||'').replace(/"/g,'&quot;')}"></div>
+    </div>
+    <div class="row">
+      <div class="field-wrap"><label class="field">Fecha</label><input type="date" id="et-date" value="${t.date}"></div>
+      <div class="field-wrap"><label class="field">Valor</label><input id="et-value" inputmode="decimal" value="${t.value}"></div>
+    </div>
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <button class="btn" id="et-save">Guardar cambios</button>
+      <button class="btn secondary" id="et-delete" style="margin-left:auto;">🗑️ Borrar testeo</button>
+    </div>
+  </div></div>`;
+  document.getElementById('modal-close').onclick = closeModal;
+  document.getElementById('modal-overlay').onclick = e=>{ if(e.target.id==='modal-overlay') closeModal(); };
+  document.getElementById('et-save').onclick = async ()=>{
+    const type = document.getElementById('et-type').value.trim(), unit = document.getElementById('et-unit').value.trim();
+    const date = document.getElementById('et-date').value, value = document.getElementById('et-value').value.trim().replace(',','.');
+    if(!type){ toast('Ingresá el nombre del test'); return; }
+    if(!date){ toast('Ingresá la fecha'); return; }
+    if(value==='' || isNaN(Number(value))){ toast('Ingresá un valor numérico'); return; }
+    t.type=type; t.unit=unit; t.date=date; t.value=value;
+    await saveTests(); closeModal(); toast('Testeo actualizado'); renderRosterTab();
+  };
+  document.getElementById('et-delete').onclick = ()=>deleteTestById(id, true);
+}
+async function deleteTestById(id, fromModal){
+  const t = STATE.tests.find(x=>x.id===id); if(!t) return;
+  const p = getPlayer(t.playerId);
+  if(!confirm(`¿Borrar el testeo "${t.type}" de ${p?p.name:'la jugadora'} (${fmtDate(t.date)}: ${t.value}${t.unit?' '+t.unit:''})? No se puede deshacer.`)) return;
+  STATE.tests = STATE.tests.filter(x=>x.id!==id);
+  await saveTests(); if(fromModal) closeModal(); toast('Testeo borrado'); renderRosterTab();
+}
 function testFormHTML(){
   const typeSuggestions = getDistinctTestTypes();
   const unitSuggestions = getDistinctUnits();
@@ -3245,9 +3292,11 @@ function testFormHTML(){
     </div>
     <button class="btn" id="btn-save-test">Guardar testeo</button>
   </div>
-  <div class="card" style="margin-top:16px;"><h3>Últimos testeos cargados</h3>
-    <table><thead><tr><th>Fecha</th><th>Jugadora</th><th>Test</th><th>Valor</th></tr></thead>
-    <tbody>${STATE.tests.slice().sort((a,b)=>b.date.localeCompare(a.date)).slice(0,10).map(t=>{ const p=getPlayer(t.playerId); return `<tr><td>${fmtDate(t.date)}</td><td>${p?p.name:'?'}</td><td>${t.type}</td><td>${t.value}${t.unit?' '+t.unit:''}</td></tr>`; }).join('')}</tbody></table>
+  <div class="card" style="margin-top:16px;"><h3>Testeos cargados</h3>
+    <div class="section-sub">Podés editar (✏️) o borrar (🗑️) cualquier resultado. Filtrá por jugadora para encontrarlo más rápido.</div>
+    <div class="field-wrap" style="max-width:320px;"><label class="field">Jugadora</label><select id="tl-filter"><option value="">Todas (últimos ${TEST_LIST_LIMIT})</option>${STATE.players.slice().sort((a,b)=>a.name.localeCompare(b.name,'es')).map(p=>`<option value="${p.id}" ${testListFilter===p.id?'selected':''}>${p.name}</option>`).join('')}</select></div>
+    <div style="overflow-x:auto;"><table><thead><tr><th>Fecha</th><th>Jugadora</th><th>Test</th><th>Valor</th><th></th></tr></thead>
+    <tbody>${STATE.tests.filter(t=>!testListFilter||t.playerId===testListFilter).slice().sort((a,b)=>b.date.localeCompare(a.date)).slice(0, testListFilter?500:TEST_LIST_LIMIT).map(t=>{ const p=getPlayer(t.playerId); return `<tr><td>${fmtDate(t.date)}</td><td>${p?p.name:'?'}</td><td>${t.type}</td><td>${t.value}${t.unit?' '+t.unit:''}</td><td style="white-space:nowrap; text-align:right;">${testRowActionsHTML(t.id)}</td></tr>`; }).join('')}</tbody></table></div>
     <button class="btn secondary sm" id="btn-export-tests" style="margin-top:12px;">Exportar todos los testeos a Excel</button>
   </div>`;
 }
@@ -3298,6 +3347,9 @@ function compareHTML(){
   </div>`;
 }
 function wireRosterTab(){
+  document.querySelectorAll('[data-edittest]').forEach(b=>b.addEventListener('click',()=>openEditTestModal(b.dataset.edittest)));
+  document.querySelectorAll('[data-deltest]').forEach(b=>b.addEventListener('click',()=>deleteTestById(b.dataset.deltest,false)));
+  const tlf=document.getElementById('tl-filter'); if(tlf) tlf.addEventListener('change',()=>{ testListFilter=tlf.value; renderRosterTab(); });
   document.querySelectorAll('[data-rtab]').forEach(b=>b.addEventListener('click',()=>{ rosterTab=b.dataset.rtab; selectedPlayerForProfile=null; render(); }));
   if(rosterTab==='plantel'){
     document.querySelectorAll('.player-card').forEach(card=>card.addEventListener('click',()=>{ selectedPlayerForProfile=card.dataset.pid; renderRosterTab(); }));
@@ -3508,8 +3560,8 @@ function drawProfileCharts(pid){
     // mismo lugar antes de crear el nuevo — Chart.js no permite reusar un canvas sin esto.
     if(chartRegistry[key] && chartRegistry[key].destroy) chartRegistry[key].destroy();
     chartRegistry[key] = new Chart(canvas.getContext('2d'), {
-      type:'line', data:{ labels: arr.map(t=>fmtDate(t.date)), datasets:[{label:`${type}${unit?' ('+unit+')':''}`, data:arr.map(t=>Number(t.value)), borderColor:getComputedStyle(document.documentElement).getPropertyValue('--red'), backgroundColor:'rgba(200,16,46,0.15)', fill:true, tension:.3, pointRadius:4, pointBackgroundColor:'#fff'}] },
-      options: chartOpts()
+      type:'line', data:{ labels: arr.map(t=>fmtDate(t.date)), datasets:[{label:`${type}${unit?' ('+unit+')':''}`, data:arr.map(t=>Number(t.value)), borderColor:getComputedStyle(document.documentElement).getPropertyValue('--red'), backgroundColor:'rgba(200,16,46,0.15)', fill:true, tension:0, pointRadius:4, pointBackgroundColor:'#fff'}] },
+      options: (()=>{ const o=chartOpts(); const r=testYRange(arr.map(t=>t.value)); o.scales.y = {...o.scales.y, ...r, ticks:{color:'#9a9c8f', maxTicksLimit:6}}; o.plugins={legend:{display:false}}; return o; })()
     });
   });
 }
@@ -3547,8 +3599,9 @@ function drawEvolutionChart(type, groupBy, filterValue, lowerBetter, onlyMulti){
   const rows = series.map(x=>{
     const first = x.byDate[x.dates[0]], last = x.byDate[x.dates[x.dates.length-1]];
     const diff = last-first; const pct = first!==0 ? (diff/Math.abs(first))*100 : null;
-    const better = x.dates.length<2 || diff===0 ? null : (lowerBetter ? diff<0 : diff>0);
-    return {x, name:x.p.name, short:x.p.name.split(' ')[0]+' '+(x.p.name.split(' ').slice(-1)[0]||''), n:x.dates.length, firstD:x.dates[0], lastD:x.dates[x.dates.length-1], first, last, diff, pct, better};
+    const small = pct!==null && Math.abs(pct)<TEST_TOL_PCT;
+    const better = x.dates.length<2 || diff===0 || small ? null : (lowerBetter ? diff<0 : diff>0);
+    return {x, small, name:x.p.name, short:x.p.name.split(' ')[0]+' '+(x.p.name.split(' ').slice(-1)[0]||''), n:x.dates.length, firstD:x.dates[0], lastD:x.dates[x.dates.length-1], first, last, diff, pct, better};
   }).sort((a,b)=>{
     const av = a.pct===null||a.n<2 ? -Infinity : (lowerBetter ? -a.pct : a.pct);
     const bv = b.pct===null||b.n<2 ? -Infinity : (lowerBetter ? -b.pct : b.pct);
@@ -3562,68 +3615,81 @@ function drawEvolutionChart(type, groupBy, filterValue, lowerBetter, onlyMulti){
   const sel = evoSel.filter(id=>rows.some(r=>r.x.p.id===id));
 
   if(evoMode==='bars'){
-    helpEl.innerHTML = `Cambio entre el <b>primer</b> y el <b>último</b> resultado de cada jugadora. <b style="color:${GREEN};">Verde</b> = mejoró · <b style="color:${RED};">Rojo</b> = empeoró${lowerBetter?' (en este test menor valor es mejor)':''}.`;
+    helpEl.innerHTML = `Cambio entre el <b>primer</b> y el <b>último</b> resultado de cada jugadora. <b style="color:${GREEN};">Verde</b> = mejoró · <b style="color:${RED};">Rojo</b> = empeoró · <b style="color:${GREY};">Gris</b> = cambio menor al ${TEST_TOL_PCT}% (dentro del margen normal)${lowerBetter?'. En este test menor valor es mejor':''}.`;
     chipsEl.innerHTML = '';
     const list = multi.length ? multi : [];
     if(!list.length){
       canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);
       legEl.textContent = 'Hace falta al menos 2 resultados por jugadora para ver el cambio.';
     } else {
-      if(wrap) wrap.style.height = Math.max(240, list.length*38+70) + 'px';
+      const nar = isNarrow();
+      if(wrap) wrap.style.height = Math.max(240, list.length*(nar?34:38)+70) + 'px';
       const o = baseOpts();
-      o.indexAxis = 'y'; o.layout = {padding:{right:12}};
+      o.indexAxis = 'y'; o.layout = {padding:{right:nar?8:12}};
+      const shortName = r=>{ const pp=r.name.split(' '); return pp.length>1 ? pp[0]+' '+pp[pp.length-1].charAt(0)+'.' : r.name; };
       o.scales = {
-        x:{ title:{display:true, text:`Cambio (%)`, color:'#9a9c8f'}, ticks:{color:'#9a9c8f', callback:v=>v+'%'}, grid:{color:ctxLine=>ctxLine.tick && ctxLine.tick.value===0 ? '#f4f2ea' : '#2a2c26', lineWidth:ctxLine=>ctxLine.tick && ctxLine.tick.value===0 ? 2 : 1} },
-        y:{ ticks:{color:'#f4f2ea', font:{size:11.5, weight:'600'}}, grid:{display:false} }
+        x:{ suggestedMin:-5, suggestedMax:5, title:{display:true, text:`Cambio (%)`, color:'#9a9c8f'}, ticks:{color:'#9a9c8f', callback:v=>v+'%'}, grid:{color:ctxLine=>ctxLine.tick && ctxLine.tick.value===0 ? '#f4f2ea' : '#2a2c26', lineWidth:ctxLine=>ctxLine.tick && ctxLine.tick.value===0 ? 2 : 1} },
+        y:{ ticks:{color:'#f4f2ea', font:{size:nar?10.5:11.5, weight:'600'}}, grid:{display:false} }
       };
       o.plugins = { legend:{display:false}, tooltip:{ callbacks:{
         title:(items)=> list[items[0].dataIndex].name,
         label:(c)=>{ const r=list[c.dataIndex]; return [`${fmtN(r.first)} → ${fmtN(r.last)}${unit?' '+unit:''}`, `Cambio: ${r.diff>0?'+':''}${fmtN(r.diff)}${unit?' '+unit:''} (${r.pct!==null?(r.pct>0?'+':'')+r.pct.toFixed(1)+'%':'—'})`, `${fmtDate(r.firstD)} → ${fmtDate(r.lastD)} · ${r.n} resultados`]; } } } };
       chartRegistry['evo'] = new Chart(canvas.getContext('2d'), { type:'bar', data:{
-        labels: list.map(r=>`${r.name}  ${r.diff>0?'+':''}${fmtN(r.diff)}${unit?' '+unit:''}`),
+        labels: list.map(r=>nar ? `${shortName(r)} ${r.diff>0?'+':''}${fmtN(r.diff)}` : `${r.name}  ${r.diff>0?'+':''}${fmtN(r.diff)}${unit?' '+unit:''}`),
         datasets:[{ data:list.map(r=>r.pct===null?0:Number(r.pct.toFixed(2))), backgroundColor:list.map(dirColor), borderRadius:6, barPercentage:0.7, categoryPercentage:0.85 }]
       }, options:o });
       legEl.textContent = rows.length>list.length ? `${rows.length-list.length} jugadora(s) con un solo resultado no se muestran en este gráfico.` : '';
     }
   } else {
     // Línea de tiempo: color por dirección, promedio del grupo y resaltado por selección
-    helpEl.innerHTML = `Cada línea es una jugadora. <b style="color:${GREEN};">Verde</b> = mejoró · <b style="color:${RED};">Rojo</b> = empeoró · gris = sin cambio. La línea <b>blanca punteada</b> es el promedio del grupo. Tocá nombres para resaltar y comparar solo a esas jugadoras.`;
-    chipsEl.innerHTML = rows.map(r=>`<button type="button" class="chip" data-evosel="${r.x.p.id}" style="cursor:pointer; border:1.5px solid ${dirColor(r)}; ${sel.includes(r.x.p.id)?`background:${dirColor(r)}; color:#fff;`:''}">${r.name.split(' ')[0]} ${r.name.split(' ').slice(1).join(' ')}</button>`).join('')
+    helpEl.innerHTML = `Cada línea es una jugadora. <b style="color:${GREEN};">Verde</b> = mejoró · <b style="color:${RED};">Rojo</b> = empeoró · gris = sin cambio (menos de ${TEST_TOL_PCT}%). La línea <b>blanca punteada</b> es el promedio del grupo. Tocá nombres para resaltar y comparar solo a esas jugadoras.`;
+    chipsEl.style.cssText = isNarrow() ? 'display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; max-height:104px; overflow-y:auto; padding:2px;' : 'display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;';
+    chipsEl.innerHTML = rows.map(r=>`<button type="button" class="chip" data-evosel="${r.x.p.id}" style="cursor:pointer; border:1.5px solid ${dirColor(r)}; ${sel.includes(r.x.p.id)?`background:${dirColor(r)}; color:#fff;`:'color:#f4f2ea; background:transparent;'}">${r.name.split(' ')[0]} ${r.name.split(' ').slice(1).join(' ')}</button>`).join('')
       + (sel.length ? `<button type="button" class="chip" data-evoclear="1" style="cursor:pointer;">✕ Limpiar selección</button>` : '');
     const allDates = Array.from(new Set(rows.flatMap(r=>r.x.dates))).sort();
     const allDays = allDates.map(dayNum);
     const hasSel = sel.length>0;
+    const narX = isNarrow();
+    const xOf = d => narX ? allDates.indexOf(d) : dayNum(d);
     const datasets = rows.map(r=>{
       const on = !hasSel || sel.includes(r.x.p.id);
       const c = dirColor(r);
-      return { label:r.name, data:r.x.dates.map(d=>({x:dayNum(d), y:r.x.byDate[d]})),
-        borderColor: on ? c : 'rgba(138,141,131,0.22)', backgroundColor: on ? c : 'rgba(138,141,131,0.22)',
-        borderWidth: hasSel && on ? 4 : (hasSel ? 1.5 : 2.2), pointRadius: hasSel && on ? 6 : (hasSel ? 2 : 3.5), pointHoverRadius:7,
-        spanGaps:true, tension:.15, order: on ? 1 : 2 };
+      const nar = isNarrow();
+      return { label:r.name, data:r.x.dates.map(d=>({x:xOf(d), y:r.x.byDate[d]})),
+        borderColor: on ? (hasSel||!nar ? c : c+'99') : 'rgba(138,141,131,0.22)', backgroundColor: on ? c : 'rgba(138,141,131,0.22)',
+        borderWidth: hasSel && on ? (nar?3:4) : (hasSel ? 1.2 : (nar?1.6:2.2)), pointRadius: hasSel && on ? (nar?4:6) : (hasSel ? 1.5 : (nar?2:3.5)), pointHoverRadius:6,
+        spanGaps:true, tension:0, order: on ? 1 : 2 };
     });
     // promedio del grupo en cada fecha de testeo (de las jugadoras que se testearon ese día)
-    const avgPts = allDates.map(d=>{ const v = rows.filter(r=>r.x.byDate[d]!==undefined).map(r=>r.x.byDate[d]); return v.length>=2 ? {x:dayNum(d), y:Number((v.reduce((a,b)=>a+b,0)/v.length).toFixed(2))} : null; }).filter(Boolean);
-    if(avgPts.length>=2) datasets.push({ label:'Promedio del grupo', data:avgPts, borderColor:'#f4f2ea', backgroundColor:'#f4f2ea', borderDash:[7,5], borderWidth:3, pointRadius:4, pointStyle:'rectRot', tension:0, order:0 });
+    const avgPts = allDates.map(d=>{ const v = rows.filter(r=>r.x.byDate[d]!==undefined).map(r=>r.x.byDate[d]); return v.length>=2 ? {x:xOf(d), y:Number((v.reduce((a,b)=>a+b,0)/v.length).toFixed(2))} : null; }).filter(Boolean);
+    if(avgPts.length>=2) datasets.push({ label:'Promedio del grupo', data:avgPts, borderColor:'#f4f2ea', backgroundColor:'#f4f2ea', borderDash:[7,5], borderWidth:3, pointRadius:narX?3:4, pointStyle:narX?'circle':'rectRot', tension:0, order:0 });
     const o = baseOpts();
-    o.interaction = { mode:'nearest', intersect:true };
-    o.layout = { padding:{right: 110} };
+    const nar = isNarrow();
+    o.interaction = { mode:'nearest', intersect:false };
+    o.layout = { padding:{right: nar ? 8 : 110} };
     const span = Math.max(allDays[allDays.length-1]-allDays[0], 1);
-    o.scales.x = { type:'linear', min: allDays[0]-Math.ceil(span*0.03), max: allDays[allDays.length-1]+Math.ceil(span*0.03),
-      afterBuildTicks: axis=>{ axis.ticks = allDays.map(v=>({value:v})); },
-      ticks:{ color:'#9a9c8f', callback:v=>fmtDate(dayToDate(v)), maxRotation:50, autoSkip:false }, grid:{color:'#2a2c26'} };
-    o.scales.y.title = { display:true, text: unit || 'Valor', color:'#9a9c8f' };
-    o.plugins = { legend:{display:false}, tooltip:{ callbacks:{ title:(items)=> items.length ? fmtDate(dayToDate(items[0].parsed.x)) : '', label:(c)=>`${c.dataset.label}: ${c.parsed.y}${unit?' '+unit:''}` } } };
+    const tickDate = v => narX ? allDates[Math.round(v)] : dayToDate(v);
+    o.scales.x = narX
+      ? { type:'linear', min:-0.4, max:allDates.length-0.6,
+          afterBuildTicks: axis=>{ let idx=allDates.map((_,i)=>i); if(idx.length>6){ const st=Math.ceil(idx.length/6); idx=idx.filter(i=>i%st===0||i===idx.length-1); } axis.ticks = idx.map(v=>({value:v})); },
+          ticks:{ color:'#9a9c8f', font:{size:10}, callback:v=>{ const d=tickDate(v); return d ? d.slice(8,10)+'/'+d.slice(5,7) : ''; }, maxRotation:0, autoSkip:false }, grid:{color:'#2a2c26'} }
+      : { type:'linear', min: allDays[0]-Math.ceil(span*0.03), max: allDays[allDays.length-1]+Math.ceil(span*0.03),
+          afterBuildTicks: axis=>{ axis.ticks = allDays.map(v=>({value:v})); },
+          ticks:{ color:'#9a9c8f', font:{size:12}, callback:v=>fmtDate(dayToDate(v)), maxRotation:50, autoSkip:false }, grid:{color:'#2a2c26'} };
+    { const allVals = rows.flatMap(r=>r.x.dates.map(d=>r.x.byDate[d])); const yr = testYRange(allVals); o.scales.y = {...o.scales.y, ...yr, ticks:{color:'#9a9c8f', font:{size:nar?10:12}}}; }
+    o.scales.y.title = { display:!nar, text: unit || 'Valor', color:'#9a9c8f' };
+    o.plugins = { legend:{display:false}, tooltip:{ callbacks:{ title:(items)=> items.length ? fmtDate(tickDate(items[0].parsed.x)) : '', label:(c)=>`${c.dataset.label}: ${c.parsed.y}${unit?' '+unit:''}` } } };
     // nombre al final de las líneas resaltadas (o de todas si son pocas)
     const endLabels = { id:'endLabels', afterDatasetsDraw(chart){
       const ctx = chart.ctx; ctx.save(); ctx.font = '600 11px sans-serif'; ctx.textBaseline = 'middle';
       chart.data.datasets.forEach((ds,i)=>{
         if(ds.label==='Promedio del grupo') return;
-        const showIt = hasSel ? sel.includes(rows.find(r=>r.name===ds.label).x.p.id) : rows.length<=6;
+        const showIt = !nar && (hasSel ? sel.includes(rows.find(r=>r.name===ds.label).x.p.id) : rows.length<=6);
         if(!showIt) return;
         const meta = chart.getDatasetMeta(i); const pt = meta.data[meta.data.length-1]; if(!pt) return;
         ctx.fillStyle = ds.borderColor; ctx.fillText(ds.label.split(' ')[0]+' '+(ds.label.split(' ').slice(-1)[0]), pt.x+9, pt.y);
       }); ctx.restore(); } };
-    if(wrap) wrap.style.height = '440px';
+    if(wrap) wrap.style.height = nar ? '340px' : '440px';
     chartRegistry['evo'] = new Chart(canvas.getContext('2d'), { type:'line', data:{ datasets }, options:o, plugins:[endLabels] });
     legEl.textContent = '';
     chipsEl.querySelectorAll('[data-evosel]').forEach(b=>b.addEventListener('click',()=>{
@@ -3642,7 +3708,7 @@ function drawEvolutionChart(type, groupBy, filterValue, lowerBetter, onlyMulti){
         <tr><td><b>${r.name}</b></td><td>${r.n}</td>
         <td>${fmtN(r.first)}${unit?' '+unit:''} <span class="muted" style="font-size:11px;">${fmtDate(r.firstD)}</span></td>
         <td>${fmtN(r.last)}${unit?' '+unit:''} <span class="muted" style="font-size:11px;">${fmtDate(r.lastD)}</span></td>
-        <td>${r.n<2 ? '<span class="muted">Un solo resultado</span>' : `<span class="badge ${r.diff===0?'info':(r.better?'ok':'danger')}">${r.diff>0?'+':''}${fmtN(r.diff)}${unit?' '+unit:''}${r.pct!==null?` (${r.pct>0?'+':''}${r.pct.toFixed(1)}%)`:''}</span>`}</td></tr>`).join('')}
+        <td>${r.n<2 ? '<span class="muted">Un solo resultado</span>' : `<span class="badge ${r.diff===0||r.small?'info':(r.better?'ok':'danger')}">${r.diff>0?'+':''}${fmtN(r.diff)}${unit?' '+unit:''}${r.pct!==null?` (${r.pct>0?'+':''}${r.pct.toFixed(1)}%)`:''}</span>${r.small&&r.diff!==0?' <span class="muted" style="font-size:10.5px;">sin cambio relevante</span>':''}`}</td></tr>`).join('')}
       </tbody></table></div>`;
 }
 function drawCompareChart(type, groupBy, filterValue, lowerBetterOverride){
@@ -3701,6 +3767,21 @@ function drawCompareChart(type, groupBy, filterValue, lowerBetterOverride){
     }
   });
 }
+/* Rango del eje Y para testeos: evita que cambios mínimos (ej. 1 cm sobre 211) se vean como saltos enormes.
+   El eje muestra siempre al menos ~16% del valor de la serie. */
+const TEST_MIN_SPAN_PCT = 0.16;
+const TEST_TOL_PCT = 2;      // cambios menores a 2% se consideran "sin cambio relevante"
+function testYRange(vals){
+  const v = vals.map(Number).filter(x=>isFinite(x)); if(!v.length) return {};
+  const lo=Math.min(...v), hi=Math.max(...v), mid=(lo+hi)/2;
+  const span = Math.max(hi-lo, Math.abs(mid)*TEST_MIN_SPAN_PCT, 1e-9);
+  const pad = span*0.12;
+  let lo2 = mid-span/2-pad, hi2 = mid+span/2+pad;
+  const full = hi2-lo2, unit = full>=60 ? 10 : full>=25 ? 5 : full>=8 ? 1 : full>=2 ? 0.5 : 0;
+  if(unit){ lo2 = Math.floor(lo2/unit)*unit; hi2 = Math.ceil(hi2/unit)*unit; }
+  return { min: lo2, max: hi2 };
+}
+function isNarrow(){ return window.innerWidth < 640; }
 function chartOpts(){ return { responsive:true, maintainAspectRatio:false, plugins:{legend:{labels:{color:'#f4f2ea'}}}, scales:{ x:{ticks:{color:'#9a9c8f'}, grid:{color:'#2a2c26'}}, y:{ticks:{color:'#9a9c8f'}, grid:{color:'#2a2c26'}} } }; }
 
 /* =============================== EXPORT HELPERS (Excel / PDF) =============================== */
